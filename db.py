@@ -42,7 +42,40 @@ async def init_db():
     from chat_db import init_chat_tables
     await init_chat_tables()
 
+    # Initialize contacts table
+    from contacts_db import init_contacts_table
+    await init_contacts_table()
+
+    # Initialize campaign tables
+    from campaign_db import init_campaign_tables
+    await init_campaign_tables()
+
+    # Initialize orders table
+    from orders_db import init_orders_table
+    await init_orders_table()
+
+    # Run schema migrations for existing tables
+    await _run_migrations(db_path=DB_PATH)
+
     logger.info(f"Database initialized at {DB_PATH}")
+
+
+async def _run_migrations(db_path):
+    """Add new columns to existing tables (safe if columns already exist)."""
+    migrations = [
+        ("conversations", "contact_id", "TEXT DEFAULT ''"),
+        ("messages", "direction", "TEXT DEFAULT 'inbound'"),
+        ("messages", "source", "TEXT DEFAULT 'ai'"),
+        ("messages", "status", "TEXT DEFAULT ''"),
+    ]
+    async with aiosqlite.connect(db_path) as db:
+        for table, column, col_type in migrations:
+            try:
+                await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+                logger.info(f"Migration: added {table}.{column}")
+            except Exception:
+                pass  # Column already exists
+        await db.commit()
 
 
 async def create_call_record(call_id: str, caller_phone: str, caller_name: str, connected_at: str):

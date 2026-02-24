@@ -50,7 +50,7 @@ async def init_chat_tables():
     logger.info("Chat tables initialized")
 
 
-async def get_or_create_conversation(phone: str, name: str = "") -> dict:
+async def get_or_create_conversation(phone: str, name: str = "", contact_id: str = "") -> dict:
     """Get active conversation for phone or create a new one.
 
     Expires conversations older than SESSION_TIMEOUT_HOURS.
@@ -74,14 +74,23 @@ async def get_or_create_conversation(phone: str, name: str = "") -> dict:
         ) as cursor:
             row = await cursor.fetchone()
             if row:
-                return dict(row)
+                conv = dict(row)
+                # Update contact_id if not set
+                if contact_id and not conv.get("contact_id"):
+                    await db.execute(
+                        "UPDATE conversations SET contact_id = ? WHERE id = ?",
+                        (contact_id, conv["id"]),
+                    )
+                    await db.commit()
+                    conv["contact_id"] = contact_id
+                return conv
 
         # Create new conversation
         conv_id = generate_id()
         now = datetime.now(timezone.utc).isoformat()
         await db.execute(
-            "INSERT INTO conversations (id, phone, name, started_at, last_message_at) VALUES (?, ?, ?, ?, ?)",
-            (conv_id, phone, name, now, now),
+            "INSERT INTO conversations (id, phone, name, contact_id, started_at, last_message_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (conv_id, phone, name, contact_id, now, now),
         )
         await db.commit()
         logger.info(f"New conversation {conv_id} for {phone}")
@@ -96,6 +105,8 @@ async def add_message(
     role: str,
     content: str,
     wa_message_id: str = "",
+    direction: str = "inbound",
+    source: str = "ai",
 ) -> str:
     """Add a message to a conversation. Returns message ID."""
     msg_id = generate_id()
@@ -103,8 +114,8 @@ async def add_message(
 
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT INTO messages (id, conversation_id, role, content, wa_message_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (msg_id, conversation_id, role, content, wa_message_id, now),
+            "INSERT INTO messages (id, conversation_id, role, content, wa_message_id, direction, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (msg_id, conversation_id, role, content, wa_message_id, direction, source, now),
         )
         await db.execute(
             "UPDATE conversations SET last_message_at = ?, message_count = message_count + 1 WHERE id = ?",
@@ -210,3 +221,59 @@ async def resolve_conversation(conversation_id: str):
         )
         await db.commit()
     logger.info(f"Conversation {conversation_id} resolved")
+
+
+async def update_message_status(wa_message_id: str, status: str):
+    """Update delivery status of an outbound message by WhatsApp message ID."""
+    if not wa_message_id:
+        return
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE messages SET status = ? WHERE wa_message_id = ?",
+            (status, wa_message_id),
+        )
+        await db.commit()
+
+
+async def get_inbox_conversations(limit: int = 50) -> list[dict]:
+    """Get conversations for inbox view with last message preview."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM conversations WHERE status IN ('active', 'handoff_pending') ORDER BY last_message_at DESC LIMIT ?",
+            (limit,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            results = []
+            for row in rows:
+                record = dict(row)
+                for field in ("topics",):
+                    if record.get(field):
+                        try:
+                            record[field] = json.loads(record[field])
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                # Fetch last message preview
+                async with db.execute(
+                    "SELECT content, role, source FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1",
+                    (record["id"],),
+                ) as msg_cursor:
+                    msg_row = await msg_cursor.fetchone()
+                    if msg_row:
+                        record["last_message"] = dict(msg_row)
+                    else:
+                        record["last_message"] = None
+                results.append(record)
+            return results
+
+
+async def get_conversation_messages(conversation_id: str, limit: int = 50, offset: int = 0) -> list[dict]:
+    """Get paginated messages for a conversation (for inbox thread view)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT ? OFFSET ?",
+            (conversation_id, limit, offset),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]

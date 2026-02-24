@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IFS Voice Agent Dashboard</title>
+    <title>IFS WhatsApp Platform</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         .tab-active { border-bottom: 2px solid #3b82f6; color: #3b82f6; font-weight: 600; }
@@ -15,7 +15,16 @@
         .badge-handoff { background: #fef3c7; color: #92400e; }
         .badge-resolved { background: #e0e7ff; color: #3730a3; }
         .badge-expired { background: #f3f4f6; color: #6b7280; }
+        .badge-new { background: #dbeafe; color: #1e40af; }
+        .badge-contacted { background: #fef3c7; color: #92400e; }
+        .badge-interested { background: #fef9c3; color: #854d0e; }
+        .badge-enrolled { background: #dcfce7; color: #166534; }
+        .badge-lost { background: #fee2e2; color: #991b1b; }
         .file-active { background: #eff6ff; border-left: 3px solid #3b82f6; }
+        .msg-user { background: #dbeafe; margin-left: auto; }
+        .msg-assistant { background: #f3f4f6; margin-right: auto; }
+        .conv-active { background: #eff6ff; border-left: 3px solid #3b82f6; }
+        .stage-select { padding: 2px 6px; border-radius: 6px; font-size: 0.75rem; font-weight: 500; border: 1px solid transparent; cursor: pointer; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -23,7 +32,7 @@
     <!-- Login Screen -->
     <div id="login-screen" class="hidden min-h-screen flex items-center justify-center">
         <div class="bg-white rounded-lg shadow-lg p-8 w-full max-w-sm border">
-            <h1 class="text-xl font-bold text-gray-900 mb-1">IFS Voice Agent</h1>
+            <h1 class="text-xl font-bold text-gray-900 mb-1">IFS WhatsApp Platform</h1>
             <p class="text-sm text-gray-500 mb-6">Enter password to access the dashboard</p>
             <form onsubmit="handleLogin(event)">
                 <input id="login-password" type="password" placeholder="Password" autofocus
@@ -36,13 +45,13 @@
         </div>
     </div>
 
-    <!-- Dashboard (hidden until authenticated) -->
+    <!-- Dashboard -->
     <div id="dashboard-screen" class="hidden">
         <nav class="bg-white shadow-sm border-b">
             <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
                 <div>
-                    <h1 class="text-lg font-bold text-gray-900">IFS Voice Agent</h1>
-                    <p class="text-xs text-gray-500">WhatsApp AI Dashboard</p>
+                    <h1 class="text-lg font-bold text-gray-900">IFS WhatsApp Platform</h1>
+                    <p class="text-xs text-gray-500">AI Voice + Chatbot + CRM</p>
                 </div>
                 <div class="flex items-center gap-3">
                     <span id="last-refresh" class="text-xs text-gray-400"></span>
@@ -78,20 +87,12 @@
         <div class="max-w-7xl mx-auto px-4 mt-6">
             <div class="flex border-b">
                 <button id="tab-calls" onclick="switchTab('calls')" class="px-4 py-2 text-sm tab-active">Calls</button>
-                <button id="tab-chats" onclick="switchTab('chats')" class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Chats</button>
+                <button id="tab-inbox" onclick="switchTab('inbox')" class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Inbox</button>
+                <button id="tab-contacts" onclick="switchTab('contacts')" class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Contacts</button>
+                <button id="tab-campaigns" onclick="switchTab('campaigns')" class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Campaigns</button>
+                <button id="tab-orders" onclick="switchTab('orders')" class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Orders</button>
                 <button id="tab-knowledge" onclick="switchTab('knowledge')" class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Knowledge</button>
             </div>
-        </div>
-
-        <!-- Filters (calls/chats only) -->
-        <div id="filters-bar" class="max-w-7xl mx-auto px-4 mt-3 flex gap-3 items-center">
-            <select id="filter-status" onchange="refreshAll()" class="text-sm border rounded px-2 py-1">
-                <option value="">All Status</option>
-                <option value="completed">Completed</option>
-                <option value="active">Active</option>
-                <option value="handoff_pending">Handoff Pending</option>
-                <option value="resolved">Resolved</option>
-            </select>
         </div>
 
         <!-- Calls Table -->
@@ -115,24 +116,201 @@
             </div>
         </div>
 
-        <!-- Chats Table -->
-        <div id="panel-chats" class="max-w-7xl mx-auto px-4 mt-3 hidden">
+        <!-- Inbox Panel (two-panel layout) -->
+        <div id="panel-inbox" class="max-w-7xl mx-auto px-4 mt-3 hidden">
+            <div class="bg-white rounded-lg shadow-sm border flex" style="height: calc(100vh - 320px); min-height: 450px;">
+                <!-- Left: Conversation List -->
+                <div class="w-80 border-r flex flex-col">
+                    <div class="p-3 border-b">
+                        <input id="inbox-search" type="text" placeholder="Search conversations..."
+                            class="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </div>
+                    <div id="inbox-list" class="flex-1 overflow-y-auto">
+                        <p class="p-4 text-sm text-gray-400">Loading...</p>
+                    </div>
+                </div>
+                <!-- Right: Chat Thread -->
+                <div class="flex-1 flex flex-col">
+                    <div id="inbox-thread-header" class="p-3 border-b flex items-center justify-between">
+                        <div>
+                            <span id="inbox-thread-name" class="text-sm font-medium text-gray-700">Select a conversation</span>
+                            <span id="inbox-thread-phone" class="text-xs text-gray-400 ml-2"></span>
+                        </div>
+                        <div id="inbox-thread-actions" class="flex items-center gap-2 hidden">
+                            <span id="inbox-ai-badge" class="badge badge-active text-xs">AI On</span>
+                            <button id="inbox-ai-toggle" onclick="toggleInboxAI()" class="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded hover:bg-gray-300">Pause AI</button>
+                            <button id="inbox-resolve-btn" onclick="resolveInboxConversation()" class="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded hover:bg-orange-200 hidden">Resolve</button>
+                        </div>
+                    </div>
+                    <div id="inbox-messages" class="flex-1 overflow-y-auto p-4 space-y-2">
+                        <p class="text-center text-sm text-gray-400 mt-20">Select a conversation to view messages</p>
+                    </div>
+                    <div id="inbox-reply-bar" class="p-3 border-t hidden">
+                        <form onsubmit="sendInboxReply(event)" class="flex gap-2">
+                            <input id="inbox-reply-input" type="text" placeholder="Type a reply..."
+                                class="flex-1 border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-600">Send</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Contacts Panel (Mini CRM) -->
+        <div id="panel-contacts" class="max-w-7xl mx-auto px-4 mt-3 hidden">
+            <!-- Pipeline Stats -->
+            <div id="contacts-pipeline" class="grid grid-cols-3 md:grid-cols-6 gap-3 mb-4">
+                <div class="bg-white rounded-lg shadow-sm p-3 border cursor-pointer hover:border-blue-300" onclick="filterContactsByStage('')">
+                    <p class="text-xs text-gray-500">Total</p>
+                    <p id="pipeline-total" class="text-xl font-bold text-gray-900">-</p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border cursor-pointer hover:border-blue-300" onclick="filterContactsByStage('new')">
+                    <p class="text-xs text-gray-500">New</p>
+                    <p id="pipeline-new" class="text-xl font-bold text-blue-600">-</p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border cursor-pointer hover:border-blue-300" onclick="filterContactsByStage('contacted')">
+                    <p class="text-xs text-gray-500">Contacted</p>
+                    <p id="pipeline-contacted" class="text-xl font-bold text-yellow-600">-</p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border cursor-pointer hover:border-blue-300" onclick="filterContactsByStage('interested')">
+                    <p class="text-xs text-gray-500">Interested</p>
+                    <p id="pipeline-interested" class="text-xl font-bold text-amber-600">-</p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border cursor-pointer hover:border-blue-300" onclick="filterContactsByStage('enrolled')">
+                    <p class="text-xs text-gray-500">Enrolled</p>
+                    <p id="pipeline-enrolled" class="text-xl font-bold text-green-600">-</p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border cursor-pointer hover:border-blue-300" onclick="filterContactsByStage('lost')">
+                    <p class="text-xs text-gray-500">Lost</p>
+                    <p id="pipeline-lost" class="text-xl font-bold text-red-600">-</p>
+                </div>
+            </div>
+
+            <!-- Search + Filter + Import/Export -->
+            <div class="flex flex-wrap gap-3 mb-3 items-center">
+                <input id="contacts-search" type="text" placeholder="Search by name or phone..."
+                    class="border rounded px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    oninput="debounceContactSearch()">
+                <select id="contacts-stage-filter" onchange="loadContacts()" class="text-sm border rounded px-2 py-1.5">
+                    <option value="">All Stages</option>
+                    <option value="new">New</option>
+                    <option value="contacted">Contacted</option>
+                    <option value="interested">Interested</option>
+                    <option value="enrolled">Enrolled</option>
+                    <option value="lost">Lost</option>
+                </select>
+                <div class="ml-auto flex gap-2">
+                    <button onclick="showImportModal()" class="text-sm bg-green-500 text-white px-3 py-1.5 rounded hover:bg-green-600">Import CSV</button>
+                    <button onclick="exportContacts()" class="text-sm bg-gray-200 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-300">Export CSV</button>
+                </div>
+            </div>
+
+            <!-- Contacts Table -->
             <div class="bg-white rounded-lg shadow-sm border overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead class="bg-gray-50 border-b">
                         <tr>
                             <th class="text-left px-4 py-2 font-medium text-gray-600">Name</th>
                             <th class="text-left px-4 py-2 font-medium text-gray-600">Phone</th>
-                            <th class="text-left px-4 py-2 font-medium text-gray-600">Messages</th>
-                            <th class="text-left px-4 py-2 font-medium text-gray-600">Status</th>
-                            <th class="text-left px-4 py-2 font-medium text-gray-600">Topics</th>
-                            <th class="text-left px-4 py-2 font-medium text-gray-600">Last Active</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Stage</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Source</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Tags</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">AI</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Last Seen</th>
                             <th class="text-left px-4 py-2 font-medium text-gray-600">Actions</th>
                         </tr>
                     </thead>
-                    <tbody id="chats-body"></tbody>
+                    <tbody id="contacts-body"></tbody>
                 </table>
-                <div id="chats-empty" class="hidden text-center py-8 text-gray-400">No conversations found</div>
+                <div id="contacts-empty" class="hidden text-center py-8 text-gray-400">No contacts found</div>
+            </div>
+        </div>
+
+        <!-- Campaigns Panel -->
+        <div id="panel-campaigns" class="max-w-7xl mx-auto px-4 mt-3 hidden">
+            <!-- Campaign Actions Bar -->
+            <div class="flex flex-wrap gap-3 mb-3 items-center">
+                <select id="campaigns-status-filter" onchange="loadCampaigns()" class="text-sm border rounded px-2 py-1.5">
+                    <option value="">All Status</option>
+                    <option value="draft">Draft</option>
+                    <option value="running">Running</option>
+                    <option value="paused">Paused</option>
+                    <option value="completed">Completed</option>
+                    <option value="failed">Failed</option>
+                </select>
+                <div class="ml-auto">
+                    <button onclick="showCreateCampaignModal()" class="text-sm bg-blue-500 text-white px-3 py-1.5 rounded hover:bg-blue-600">+ New Campaign</button>
+                </div>
+            </div>
+
+            <!-- Campaigns Table -->
+            <div class="bg-white rounded-lg shadow-sm border overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 border-b">
+                        <tr>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Name</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Template</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Status</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Recipients</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Sent</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Delivered</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Created</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="campaigns-body"></tbody>
+                </table>
+                <div id="campaigns-empty" class="hidden text-center py-8 text-gray-400">No campaigns found</div>
+            </div>
+        </div>
+
+        <!-- Orders Panel -->
+        <div id="panel-orders" class="max-w-7xl mx-auto px-4 mt-3 hidden">
+            <!-- Order Stats -->
+            <div class="grid grid-cols-3 md:grid-cols-6 gap-3 mb-4">
+                <div class="bg-white rounded-lg shadow-sm p-3 border">
+                    <p class="text-xs text-gray-500">Total Orders</p>
+                    <p id="order-stat-total" class="text-xl font-bold text-gray-900">-</p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border">
+                    <p class="text-xs text-gray-500">Pending</p>
+                    <p id="order-stat-pending" class="text-xl font-bold text-yellow-600">-</p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border">
+                    <p class="text-xs text-gray-500">Payment Sent</p>
+                    <p id="order-stat-payment_sent" class="text-xl font-bold text-blue-600">-</p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border">
+                    <p class="text-xs text-gray-500">Completed</p>
+                    <p id="order-stat-payment_completed" class="text-xl font-bold text-green-600">-</p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border">
+                    <p class="text-xs text-gray-500">Failed</p>
+                    <p id="order-stat-failed" class="text-xl font-bold text-red-600">-</p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border">
+                    <p class="text-xs text-gray-500">Revenue</p>
+                    <p id="order-stat-revenue" class="text-xl font-bold text-green-700">-</p>
+                </div>
+            </div>
+
+            <!-- Orders Table -->
+            <div class="bg-white rounded-lg shadow-sm border overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 border-b">
+                        <tr>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Order ID</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Contact</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Phone</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Amount</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Status</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Payment</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Created</th>
+                        </tr>
+                    </thead>
+                    <tbody id="orders-body"></tbody>
+                </table>
+                <div id="orders-empty" class="hidden text-center py-8 text-gray-400">No orders found</div>
             </div>
         </div>
 
@@ -140,16 +318,13 @@
         <div id="panel-knowledge" class="max-w-7xl mx-auto px-4 mt-3 hidden">
             <div class="bg-white rounded-lg shadow-sm border">
                 <div class="flex h-[calc(100vh-320px)] min-h-[400px]">
-                    <!-- File list sidebar -->
                     <div class="w-64 border-r flex flex-col">
                         <div class="p-3 border-b flex items-center justify-between">
                             <span class="text-sm font-medium text-gray-700">Files</span>
                             <button onclick="createNewFile()" class="text-xs bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600">+ New</button>
                         </div>
-                        <div id="knowledge-file-list" class="flex-1 overflow-y-auto">
-                        </div>
+                        <div id="knowledge-file-list" class="flex-1 overflow-y-auto"></div>
                     </div>
-                    <!-- Editor panel -->
                     <div class="flex-1 flex flex-col">
                         <div id="editor-header" class="p-3 border-b flex items-center justify-between">
                             <span id="editor-filename" class="text-sm font-medium text-gray-700">Select a file</span>
@@ -169,6 +344,167 @@
             </div>
         </div>
 
+        <!-- Import Modal -->
+        <div id="import-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-lg mx-4">
+                <h3 class="text-lg font-bold text-gray-900 mb-2">Import Contacts</h3>
+                <p class="text-sm text-gray-500 mb-4">Upload a CSV file with columns: <code class="bg-gray-100 px-1 rounded">phone, name, email, tags</code> (phone is required)</p>
+                <input id="import-file" type="file" accept=".csv" onchange="previewImport()"
+                    class="w-full border rounded px-3 py-2 text-sm mb-3">
+                <div id="import-preview" class="hidden mb-3">
+                    <p class="text-sm text-gray-600 mb-1"><span id="import-count">0</span> contacts to import:</p>
+                    <div class="max-h-40 overflow-y-auto border rounded text-xs">
+                        <table class="w-full">
+                            <thead class="bg-gray-50"><tr><th class="px-2 py-1 text-left">Phone</th><th class="px-2 py-1 text-left">Name</th><th class="px-2 py-1 text-left">Email</th><th class="px-2 py-1 text-left">Tags</th></tr></thead>
+                            <tbody id="import-preview-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="flex gap-2 justify-end">
+                    <button onclick="closeImportModal()" class="text-sm bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300">Cancel</button>
+                    <button id="import-confirm-btn" onclick="confirmImport()" disabled class="text-sm bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 disabled:opacity-50">Import</button>
+                </div>
+                <p id="import-result" class="text-sm mt-2 hidden"></p>
+            </div>
+        </div>
+
+        <!-- Contact Edit Modal -->
+        <div id="contact-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
+                <h3 class="text-lg font-bold text-gray-900 mb-4">Edit Contact</h3>
+                <input type="hidden" id="edit-contact-id">
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Name</label>
+                        <input id="edit-name" type="text" class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Email</label>
+                        <input id="edit-email" type="email" class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Stage</label>
+                        <select id="edit-stage" class="w-full border rounded px-3 py-1.5 text-sm">
+                            <option value="new">New</option>
+                            <option value="contacted">Contacted</option>
+                            <option value="interested">Interested</option>
+                            <option value="enrolled">Enrolled</option>
+                            <option value="lost">Lost</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Tags (comma separated)</label>
+                        <input id="edit-tags" type="text" class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="e.g. ca, mba, finance">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Notes</label>
+                        <textarea id="edit-notes" rows="3" class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"></textarea>
+                    </div>
+                </div>
+                <div class="flex gap-2 justify-end mt-4">
+                    <button onclick="closeContactModal()" class="text-sm bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300">Cancel</button>
+                    <button onclick="saveContactEdit()" class="text-sm bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Save</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Create Campaign Modal -->
+        <div id="campaign-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
+                <h3 class="text-lg font-bold text-gray-900 mb-4">Create Campaign</h3>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Campaign Name</label>
+                        <input id="campaign-name" type="text" placeholder="e.g. March Admissions"
+                            class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Template</label>
+                        <select id="campaign-template" class="w-full border rounded px-3 py-1.5 text-sm">
+                            <option value="">Loading templates...</option>
+                        </select>
+                        <p class="text-xs text-gray-400 mt-1">Templates are managed in Meta Business Manager</p>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Language</label>
+                        <select id="campaign-language" class="w-full border rounded px-3 py-1.5 text-sm">
+                            <option value="en">English</option>
+                            <option value="hi">Hindi</option>
+                            <option value="en_US">English (US)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Rate Limit (messages/min)</label>
+                        <input id="campaign-rate" type="number" value="60" min="1" max="200"
+                            class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </div>
+                </div>
+                <div class="flex gap-2 justify-end mt-4">
+                    <button onclick="closeCampaignModal()" class="text-sm bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300">Cancel</button>
+                    <button onclick="createNewCampaign()" class="text-sm bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Create</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Campaign Detail Modal -->
+        <div id="campaign-detail-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 id="campaign-detail-title" class="text-lg font-bold text-gray-900">Campaign Detail</h3>
+                    <button onclick="closeCampaignDetailModal()" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+                </div>
+                <div id="campaign-detail-info" class="space-y-3 mb-4">
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div class="bg-gray-50 rounded p-2 text-center">
+                            <p class="text-xs text-gray-500">Total</p>
+                            <p id="cd-total" class="text-lg font-bold">-</p>
+                        </div>
+                        <div class="bg-green-50 rounded p-2 text-center">
+                            <p class="text-xs text-gray-500">Sent</p>
+                            <p id="cd-sent" class="text-lg font-bold text-green-600">-</p>
+                        </div>
+                        <div class="bg-blue-50 rounded p-2 text-center">
+                            <p class="text-xs text-gray-500">Delivered</p>
+                            <p id="cd-delivered" class="text-lg font-bold text-blue-600">-</p>
+                        </div>
+                        <div class="bg-red-50 rounded p-2 text-center">
+                            <p class="text-xs text-gray-500">Failed</p>
+                            <p id="cd-failed" class="text-lg font-bold text-red-600">-</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex gap-2 mb-4">
+                    <button id="cd-start-btn" onclick="startCampaign()" class="text-sm bg-green-500 text-white px-3 py-1.5 rounded hover:bg-green-600 hidden">Start Campaign</button>
+                    <button id="cd-pause-btn" onclick="pauseCampaign()" class="text-sm bg-yellow-500 text-white px-3 py-1.5 rounded hover:bg-yellow-600 hidden">Pause</button>
+                    <button id="cd-upload-btn" onclick="showCampaignRecipientUpload()" class="text-sm bg-blue-500 text-white px-3 py-1.5 rounded hover:bg-blue-600">Upload Recipients CSV</button>
+                    <button onclick="exportCampaignResults()" class="text-sm bg-gray-200 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-300">Export Results</button>
+                    <button onclick="deleteCampaignFromDetail()" class="text-sm bg-red-100 text-red-700 px-3 py-1.5 rounded hover:bg-red-200">Delete</button>
+                </div>
+                <!-- Recipient upload area -->
+                <div id="cd-upload-area" class="hidden mb-4 p-3 bg-gray-50 rounded border">
+                    <input id="cd-upload-file" type="file" accept=".csv" onchange="previewCampaignRecipients()" class="text-sm mb-2">
+                    <div id="cd-upload-preview" class="hidden text-xs mb-2"></div>
+                    <button id="cd-upload-confirm" onclick="confirmCampaignRecipients()" disabled class="text-sm bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600 disabled:opacity-50">Upload</button>
+                    <span id="cd-upload-result" class="text-sm ml-2"></span>
+                </div>
+                <!-- Recipients table -->
+                <div class="bg-white border rounded overflow-x-auto max-h-64 overflow-y-auto">
+                    <table class="w-full text-xs">
+                        <thead class="bg-gray-50 border-b sticky top-0">
+                            <tr>
+                                <th class="text-left px-3 py-1 font-medium text-gray-600">Phone</th>
+                                <th class="text-left px-3 py-1 font-medium text-gray-600">Name</th>
+                                <th class="text-left px-3 py-1 font-medium text-gray-600">Status</th>
+                                <th class="text-left px-3 py-1 font-medium text-gray-600">Sent At</th>
+                                <th class="text-left px-3 py-1 font-medium text-gray-600">Error</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cd-recipients-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
         <div class="h-16"></div>
     </div>
 
@@ -176,6 +512,11 @@
     let currentTab = 'calls';
     let currentKnowledgeFile = null;
     let autoRefreshInterval = null;
+    let inboxPollInterval = null;
+    let selectedConvId = null;
+    let selectedConvContactId = null;
+    let importRecords = [];
+    let contactSearchTimeout = null;
 
     // --- Auth ---
 
@@ -183,10 +524,8 @@
         try {
             const res = await fetch('/auth/check');
             const data = await res.json();
-            if (data.authenticated) {
+            if (data.authenticated || data.auth_required === false) {
                 showDashboard();
-            } else if (data.auth_required === false) {
-                showDashboard(); // Auth disabled
             } else {
                 showLogin();
             }
@@ -199,6 +538,7 @@
         document.getElementById('login-screen').classList.remove('hidden');
         document.getElementById('dashboard-screen').classList.add('hidden');
         if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+        if (inboxPollInterval) clearInterval(inboxPollInterval);
     }
 
     function showDashboard() {
@@ -213,7 +553,6 @@
         const password = document.getElementById('login-password').value;
         const errorEl = document.getElementById('login-error');
         errorEl.classList.add('hidden');
-
         try {
             const res = await fetch('/auth/login', {
                 method: 'POST',
@@ -236,13 +575,9 @@
         showLogin();
     }
 
-    // Wrapper for authenticated fetch — redirects to login on 401
     async function authFetch(url, options = {}) {
         const res = await fetch(url, options);
-        if (res.status === 401) {
-            showLogin();
-            throw new Error('Unauthorized');
-        }
+        if (res.status === 401) { showLogin(); throw new Error('Unauthorized'); }
         return res;
     }
 
@@ -250,36 +585,35 @@
 
     function switchTab(tab) {
         currentTab = tab;
-        const tabs = ['calls', 'chats', 'knowledge'];
-        tabs.forEach(t => {
-            const tabBtn = document.getElementById('tab-' + t);
+        ['calls', 'inbox', 'contacts', 'campaigns', 'orders', 'knowledge'].forEach(t => {
+            const btn = document.getElementById('tab-' + t);
             const panel = document.getElementById('panel-' + t);
             if (t === tab) {
-                tabBtn.className = 'px-4 py-2 text-sm tab-active';
+                btn.className = 'px-4 py-2 text-sm tab-active';
                 panel.classList.remove('hidden');
             } else {
-                tabBtn.className = 'px-4 py-2 text-sm text-gray-500 hover:text-gray-700';
+                btn.className = 'px-4 py-2 text-sm text-gray-500 hover:text-gray-700';
                 panel.classList.add('hidden');
             }
         });
-        // Show/hide filters bar (only for calls/chats)
-        document.getElementById('filters-bar').classList.toggle('hidden', tab === 'knowledge');
-        // Load knowledge files when switching to knowledge tab
         if (tab === 'knowledge') loadKnowledgeFiles();
+        if (tab === 'inbox') { loadInbox(); startInboxPoll(); }
+        else { stopInboxPoll(); }
+        if (tab === 'contacts') { loadContacts(); loadContactStats(); }
+        if (tab === 'campaigns') loadCampaigns();
+        if (tab === 'orders') { loadOrders(); loadOrderStats(); }
     }
 
     // --- Helpers ---
 
     function statusBadge(status) {
-        const cls = {
-            'completed': 'badge-completed',
-            'active': 'badge-active',
-            'handoff_pending': 'badge-handoff',
-            'resolved': 'badge-resolved',
-            'expired': 'badge-expired',
-        }[status] || 'badge-completed';
-        const label = status ? status.replace('_', ' ') : 'unknown';
-        return `<span class="badge ${cls}">${label}</span>`;
+        const cls = { 'completed': 'badge-completed', 'active': 'badge-active', 'handoff_pending': 'badge-handoff', 'resolved': 'badge-resolved', 'expired': 'badge-expired' }[status] || 'badge-completed';
+        return `<span class="badge ${cls}">${(status || 'unknown').replace('_', ' ')}</span>`;
+    }
+
+    function stageBadge(stage) {
+        const cls = { 'new': 'badge-new', 'contacted': 'badge-contacted', 'interested': 'badge-interested', 'enrolled': 'badge-enrolled', 'lost': 'badge-lost' }[stage] || 'badge-new';
+        return `<span class="badge ${cls}">${stage || 'new'}</span>`;
     }
 
     function topicBadges(topics) {
@@ -300,6 +634,18 @@
             const d = new Date(iso);
             return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
         } catch { return iso; }
+    }
+
+    function formatTimeShort(iso) {
+        if (!iso) return '';
+        try {
+            const d = new Date(iso);
+            const now = new Date();
+            if (d.toDateString() === now.toDateString()) {
+                return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+            }
+            return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+        } catch { return ''; }
     }
 
     function escapeHtml(text) {
@@ -334,29 +680,17 @@
     }
 
     async function loadCalls() {
-        const statusFilter = document.getElementById('filter-status').value;
         try {
             const res = await authFetch('/calls?limit=100');
             const data = await res.json();
-            let calls = data.calls || [];
-
-            if (statusFilter) calls = calls.filter(c => c.status === statusFilter);
-
+            const calls = data.calls || [];
             const tbody = document.getElementById('calls-body');
             const empty = document.getElementById('calls-empty');
-
-            if (!calls.length) {
-                tbody.innerHTML = '';
-                empty.classList.remove('hidden');
-                return;
-            }
+            if (!calls.length) { tbody.innerHTML = ''; empty.classList.remove('hidden'); return; }
             empty.classList.add('hidden');
-
             tbody.innerHTML = calls.map(c => {
-                const hasRecording = c.recording_path;
                 const isHandoff = c.status === 'handoff_pending';
-                // Extract call_id from recording path for the auth endpoint
-                const recordingSrc = hasRecording ? `/api/recordings/${c.id}` : '';
+                const recordingSrc = c.recording_path ? `/api/recordings/${c.id}` : '';
                 return `
                     <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="toggleTranscript('call-${c.id}')">
                         <td class="px-4 py-2">${escapeHtml(c.caller_name || '-')}</td>
@@ -365,22 +699,14 @@
                         <td class="px-4 py-2">${statusBadge(c.status)}</td>
                         <td class="px-4 py-2">${topicBadges(c.topics)}</td>
                         <td class="px-4 py-2 text-xs text-gray-500">${formatTime(c.connected_at || c.created_at)}</td>
-                        <td class="px-4 py-2">
-                            ${isHandoff ? `<button onclick="event.stopPropagation(); resolveCall('${c.id}')" class="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded hover:bg-orange-200">Resolve</button>` : ''}
-                        </td>
+                        <td class="px-4 py-2">${isHandoff ? `<button onclick="event.stopPropagation(); resolveCall('${c.id}')" class="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded hover:bg-orange-200">Resolve</button>` : ''}</td>
                     </tr>
                     <tr id="transcript-call-${c.id}" class="transcript-row">
                         <td colspan="7" class="px-4 py-3 bg-gray-50">
                             <div class="max-w-3xl">
                                 <h4 class="font-medium text-gray-700 mb-2">Transcript</h4>
-                                <div class="bg-white border rounded p-3 max-h-64 overflow-y-auto text-sm">
-                                    ${renderTranscript(c.transcript)}
-                                </div>
-                                ${hasRecording ? `
-                                <div class="mt-2">
-                                    <h4 class="font-medium text-gray-700 mb-1">Recording</h4>
-                                    <audio controls class="w-full" src="${recordingSrc}"></audio>
-                                </div>` : ''}
+                                <div class="bg-white border rounded p-3 max-h-64 overflow-y-auto text-sm">${renderTranscript(c.transcript)}</div>
+                                ${recordingSrc ? `<div class="mt-2"><h4 class="font-medium text-gray-700 mb-1">Recording</h4><audio controls class="w-full" src="${recordingSrc}"></audio></div>` : ''}
                             </div>
                         </td>
                     </tr>`;
@@ -388,80 +714,690 @@
         } catch (e) { if (e.message !== 'Unauthorized') console.error('Calls error:', e); }
     }
 
-    // --- Chats ---
+    // --- Inbox ---
 
-    async function resolveConversation(convId) {
-        if (!confirm('Mark this handoff as resolved?')) return;
+    async function loadInbox() {
         try {
-            await authFetch(`/api/conversations/${convId}/resolve`, { method: 'PATCH' });
-            refreshAll();
+            const res = await authFetch('/api/inbox?limit=50');
+            const data = await res.json();
+            const convs = data.conversations || [];
+            const list = document.getElementById('inbox-list');
+            if (!convs.length) {
+                list.innerHTML = '<p class="p-4 text-sm text-gray-400">No active conversations</p>';
+                return;
+            }
+            list.innerHTML = convs.map(c => {
+                const isActive = selectedConvId === c.id;
+                const lastMsg = c.last_message;
+                const preview = lastMsg ? (lastMsg.content || '').substring(0, 50) : 'No messages';
+                const sourceIcon = lastMsg && lastMsg.source === 'manual' ? '(You)' : lastMsg && lastMsg.role === 'assistant' ? '(AI)' : '';
+                const isHandoff = c.status === 'handoff_pending';
+                return `
+                    <div class="px-3 py-2.5 border-b cursor-pointer hover:bg-gray-50 ${isActive ? 'conv-active' : ''}"
+                        onclick="openConversation('${c.id}', '${escapeHtml(c.name || '')}', '${escapeHtml(c.phone || '')}', '${c.contact_id || ''}', '${c.status}')">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm font-medium text-gray-800 truncate">${escapeHtml(c.name || c.phone || '-')}</span>
+                            <span class="text-xs text-gray-400">${formatTimeShort(c.last_message_at)}</span>
+                        </div>
+                        <div class="flex items-center gap-1 mt-0.5">
+                            <span class="text-xs text-gray-500 truncate flex-1">${sourceIcon} ${escapeHtml(preview)}</span>
+                            ${isHandoff ? '<span class="badge badge-handoff text-xs">handoff</span>' : ''}
+                        </div>
+                    </div>`;
+            }).join('');
+        } catch (e) { if (e.message !== 'Unauthorized') console.error('Inbox error:', e); }
+    }
+
+    async function openConversation(convId, name, phone, contactId, status) {
+        selectedConvId = convId;
+        selectedConvContactId = contactId;
+        document.getElementById('inbox-thread-name').textContent = name || phone || 'Unknown';
+        document.getElementById('inbox-thread-phone').textContent = phone ? `+${phone}` : '';
+        document.getElementById('inbox-thread-actions').classList.remove('hidden');
+        document.getElementById('inbox-reply-bar').classList.remove('hidden');
+
+        // Show/hide resolve button
+        const resolveBtn = document.getElementById('inbox-resolve-btn');
+        resolveBtn.classList.toggle('hidden', status !== 'handoff_pending');
+
+        // Load AI status
+        if (contactId) {
+            try {
+                const cRes = await authFetch(`/api/contacts/${contactId}`);
+                const contact = await cRes.json();
+                updateAIBadge(contact.ai_enabled);
+            } catch (e) { console.error('Contact fetch error:', e); }
+        }
+
+        // Load messages
+        await loadConversationThread(convId);
+        loadInbox(); // refresh list to highlight active
+    }
+
+    async function loadConversationThread(convId) {
+        const container = document.getElementById('inbox-messages');
+        try {
+            const res = await authFetch(`/api/inbox/${convId}/messages?limit=100`);
+            const data = await res.json();
+            const msgs = data.messages || [];
+            if (!msgs.length) {
+                container.innerHTML = '<p class="text-center text-sm text-gray-400 mt-20">No messages yet</p>';
+                return;
+            }
+            container.innerHTML = msgs.map(m => {
+                const isUser = m.role === 'user';
+                const align = isUser ? 'items-end' : 'items-start';
+                const bgClass = isUser ? 'msg-user' : 'msg-assistant';
+                const sourceLabel = m.source === 'manual' ? 'You' : m.source === 'ai' ? 'AI' : m.source === 'system' ? 'System' : '';
+                return `
+                    <div class="flex flex-col ${align}">
+                        <div class="${bgClass} rounded-lg px-3 py-2 max-w-[75%] text-sm">
+                            ${escapeHtml(m.content)}
+                        </div>
+                        <div class="flex items-center gap-1 mt-0.5 px-1">
+                            ${sourceLabel ? `<span class="text-xs text-gray-400">${sourceLabel}</span>` : ''}
+                            <span class="text-xs text-gray-300">${formatTimeShort(m.created_at)}</span>
+                            ${m.status ? `<span class="text-xs text-gray-300">${m.status}</span>` : ''}
+                        </div>
+                    </div>`;
+            }).join('');
+            container.scrollTop = container.scrollHeight;
+        } catch (e) { if (e.message !== 'Unauthorized') console.error('Messages error:', e); }
+    }
+
+    async function sendInboxReply(e) {
+        e.preventDefault();
+        if (!selectedConvId) return;
+        const input = document.getElementById('inbox-reply-input');
+        const message = input.value.trim();
+        if (!message) return;
+        input.value = '';
+        input.disabled = true;
+        try {
+            await authFetch('/api/messages/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ conversation_id: selectedConvId, message }),
+            });
+            await loadConversationThread(selectedConvId);
+        } catch (e) {
+            if (e.message !== 'Unauthorized') alert('Failed to send: ' + e.message);
+        } finally {
+            input.disabled = false;
+            input.focus();
+        }
+    }
+
+    function updateAIBadge(enabled) {
+        const badge = document.getElementById('inbox-ai-badge');
+        const btn = document.getElementById('inbox-ai-toggle');
+        if (enabled) {
+            badge.textContent = 'AI On';
+            badge.className = 'badge badge-active text-xs';
+            btn.textContent = 'Pause AI';
+        } else {
+            badge.textContent = 'AI Off';
+            badge.className = 'badge badge-expired text-xs';
+            btn.textContent = 'Resume AI';
+        }
+    }
+
+    async function toggleInboxAI() {
+        if (!selectedConvContactId) return;
+        const badge = document.getElementById('inbox-ai-badge');
+        const currentlyOn = badge.textContent === 'AI On';
+        try {
+            await authFetch(`/api/contacts/${selectedConvContactId}/ai`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: !currentlyOn }),
+            });
+            updateAIBadge(!currentlyOn);
+        } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to toggle AI: ' + e.message); }
+    }
+
+    async function resolveInboxConversation() {
+        if (!selectedConvId || !confirm('Mark this handoff as resolved?')) return;
+        try {
+            await authFetch(`/api/conversations/${selectedConvId}/resolve`, { method: 'PATCH' });
+            document.getElementById('inbox-resolve-btn').classList.add('hidden');
+            loadInbox();
         } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to resolve: ' + e.message); }
     }
 
-    async function loadChats() {
-        const statusFilter = document.getElementById('filter-status').value;
+    function startInboxPoll() {
+        stopInboxPoll();
+        inboxPollInterval = setInterval(() => {
+            loadInbox();
+            if (selectedConvId) loadConversationThread(selectedConvId);
+        }, 5000);
+    }
+
+    function stopInboxPoll() {
+        if (inboxPollInterval) { clearInterval(inboxPollInterval); inboxPollInterval = null; }
+    }
+
+    // --- Contacts ---
+
+    async function loadContactStats() {
         try {
-            const res = await authFetch('/api/conversations?limit=100');
+            const res = await authFetch('/api/contacts/stats');
             const data = await res.json();
-            let convs = data.conversations || [];
+            document.getElementById('pipeline-total').textContent = data.total || 0;
+            document.getElementById('pipeline-new').textContent = data.new || 0;
+            document.getElementById('pipeline-contacted').textContent = data.contacted || 0;
+            document.getElementById('pipeline-interested').textContent = data.interested || 0;
+            document.getElementById('pipeline-enrolled').textContent = data.enrolled || 0;
+            document.getElementById('pipeline-lost').textContent = data.lost || 0;
+        } catch (e) { if (e.message !== 'Unauthorized') console.error('Stats error:', e); }
+    }
 
-            if (statusFilter) convs = convs.filter(c => c.status === statusFilter);
+    function filterContactsByStage(stage) {
+        document.getElementById('contacts-stage-filter').value = stage;
+        loadContacts();
+    }
 
-            const tbody = document.getElementById('chats-body');
-            const empty = document.getElementById('chats-empty');
+    function debounceContactSearch() {
+        if (contactSearchTimeout) clearTimeout(contactSearchTimeout);
+        contactSearchTimeout = setTimeout(loadContacts, 300);
+    }
 
-            if (!convs.length) {
-                tbody.innerHTML = '';
-                empty.classList.remove('hidden');
-                return;
-            }
+    async function loadContacts() {
+        const search = document.getElementById('contacts-search').value.trim();
+        const stage = document.getElementById('contacts-stage-filter').value;
+        const params = new URLSearchParams({ limit: '100' });
+        if (search) params.set('search', search);
+        if (stage) params.set('stage', stage);
+        try {
+            const res = await authFetch(`/api/contacts?${params}`);
+            const data = await res.json();
+            const contacts = data.contacts || [];
+            const tbody = document.getElementById('contacts-body');
+            const empty = document.getElementById('contacts-empty');
+            if (!contacts.length) { tbody.innerHTML = ''; empty.classList.remove('hidden'); return; }
             empty.classList.add('hidden');
-
-            tbody.innerHTML = convs.map(c => {
-                const isHandoff = c.status === 'handoff_pending';
+            tbody.innerHTML = contacts.map(c => {
+                const tags = Array.isArray(c.tags) ? c.tags : [];
+                const tagHtml = tags.length ? tags.map(t => `<span class="badge bg-gray-100 text-gray-600">${escapeHtml(t)}</span>`).join(' ') : '<span class="text-gray-300">-</span>';
                 return `
-                    <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="loadConversationMessages('${c.id}')">
+                    <tr class="border-b hover:bg-gray-50">
                         <td class="px-4 py-2">${escapeHtml(c.name || '-')}</td>
                         <td class="px-4 py-2 font-mono text-xs">${escapeHtml(c.phone || '-')}</td>
-                        <td class="px-4 py-2">${c.message_count || 0}</td>
-                        <td class="px-4 py-2">${statusBadge(c.status)}</td>
-                        <td class="px-4 py-2">${topicBadges(c.topics)}</td>
-                        <td class="px-4 py-2 text-xs text-gray-500">${formatTime(c.last_message_at)}</td>
                         <td class="px-4 py-2">
-                            ${isHandoff ? `<button onclick="event.stopPropagation(); resolveConversation('${c.id}')" class="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded hover:bg-orange-200">Resolve</button>` : ''}
+                            <select class="stage-select badge-${c.stage || 'new'}" onchange="changeStage('${c.id}', this.value)">
+                                ${['new','contacted','interested','enrolled','lost'].map(s => `<option value="${s}" ${s === c.stage ? 'selected' : ''}>${s}</option>`).join('')}
+                            </select>
                         </td>
-                    </tr>
-                    <tr id="transcript-chat-${c.id}" class="transcript-row">
-                        <td colspan="7" class="px-4 py-3 bg-gray-50">
-                            <div class="max-w-3xl">
-                                <h4 class="font-medium text-gray-700 mb-2">Messages</h4>
-                                <div id="messages-${c.id}" class="bg-white border rounded p-3 max-h-64 overflow-y-auto text-sm">
-                                    <p class="text-gray-400">Loading...</p>
-                                </div>
-                            </div>
+                        <td class="px-4 py-2 text-xs text-gray-500">${escapeHtml(c.source || '-')}</td>
+                        <td class="px-4 py-2">${tagHtml}</td>
+                        <td class="px-4 py-2">
+                            <span class="badge ${c.ai_enabled ? 'badge-active' : 'badge-expired'}">${c.ai_enabled ? 'On' : 'Off'}</span>
+                        </td>
+                        <td class="px-4 py-2 text-xs text-gray-500">${formatTime(c.last_seen)}</td>
+                        <td class="px-4 py-2">
+                            <button onclick="editContact('${c.id}')" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">Edit</button>
                         </td>
                     </tr>`;
             }).join('');
-        } catch (e) { if (e.message !== 'Unauthorized') console.error('Chats error:', e); }
+        } catch (e) { if (e.message !== 'Unauthorized') console.error('Contacts error:', e); }
     }
 
-    async function loadConversationMessages(convId) {
-        const row = document.getElementById('transcript-chat-' + convId);
-        if (row) {
-            row.classList.toggle('open');
-            if (row.classList.contains('open')) {
-                try {
-                    const res = await authFetch(`/api/conversations/${convId}`);
-                    const data = await res.json();
-                    const container = document.getElementById('messages-' + convId);
-                    if (data.messages && data.messages.length) {
-                        container.innerHTML = renderTranscript(data.messages);
-                    } else {
-                        container.innerHTML = '<p class="text-gray-400 italic">No messages</p>';
-                    }
-                } catch (e) { if (e.message !== 'Unauthorized') console.error('Messages error:', e); }
+    async function changeStage(contactId, newStage) {
+        try {
+            await authFetch(`/api/contacts/${contactId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ stage: newStage }),
+            });
+            loadContactStats();
+        } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to update stage: ' + e.message); }
+    }
+
+    async function editContact(contactId) {
+        try {
+            const res = await authFetch(`/api/contacts/${contactId}`);
+            const c = await res.json();
+            document.getElementById('edit-contact-id').value = c.id;
+            document.getElementById('edit-name').value = c.name || '';
+            document.getElementById('edit-email').value = c.email || '';
+            document.getElementById('edit-stage').value = c.stage || 'new';
+            document.getElementById('edit-tags').value = Array.isArray(c.tags) ? c.tags.join(', ') : '';
+            document.getElementById('edit-notes').value = c.notes || '';
+            document.getElementById('contact-modal').classList.remove('hidden');
+        } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to load contact: ' + e.message); }
+    }
+
+    function closeContactModal() {
+        document.getElementById('contact-modal').classList.add('hidden');
+    }
+
+    async function saveContactEdit() {
+        const contactId = document.getElementById('edit-contact-id').value;
+        const tagsRaw = document.getElementById('edit-tags').value;
+        const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
+        const body = {
+            name: document.getElementById('edit-name').value.trim(),
+            email: document.getElementById('edit-email').value.trim(),
+            stage: document.getElementById('edit-stage').value,
+            tags,
+            notes: document.getElementById('edit-notes').value.trim(),
+        };
+        try {
+            await authFetch(`/api/contacts/${contactId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            closeContactModal();
+            loadContacts();
+            loadContactStats();
+        } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to save: ' + e.message); }
+    }
+
+    // --- Import/Export ---
+
+    function showImportModal() {
+        importRecords = [];
+        document.getElementById('import-file').value = '';
+        document.getElementById('import-preview').classList.add('hidden');
+        document.getElementById('import-result').classList.add('hidden');
+        document.getElementById('import-confirm-btn').disabled = true;
+        document.getElementById('import-modal').classList.remove('hidden');
+    }
+
+    function closeImportModal() {
+        document.getElementById('import-modal').classList.add('hidden');
+    }
+
+    function previewImport() {
+        const file = document.getElementById('import-file').files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const text = e.target.result;
+            const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+            if (lines.length < 2) { alert('CSV must have a header row and at least one data row'); return; }
+
+            const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+            const phoneIdx = headers.indexOf('phone');
+            if (phoneIdx === -1) { alert('CSV must have a "phone" column'); return; }
+            const nameIdx = headers.indexOf('name');
+            const emailIdx = headers.indexOf('email');
+            const tagsIdx = headers.indexOf('tags');
+
+            importRecords = [];
+            for (let i = 1; i < lines.length; i++) {
+                const cols = lines[i].split(',').map(c => c.trim());
+                const phone = cols[phoneIdx] || '';
+                if (!phone) continue;
+                importRecords.push({
+                    phone,
+                    name: nameIdx >= 0 ? (cols[nameIdx] || '') : '',
+                    email: emailIdx >= 0 ? (cols[emailIdx] || '') : '',
+                    tags: tagsIdx >= 0 ? (cols[tagsIdx] || '') : '',
+                });
             }
+
+            document.getElementById('import-count').textContent = importRecords.length;
+            const tbody = document.getElementById('import-preview-body');
+            tbody.innerHTML = importRecords.slice(0, 10).map(r => `
+                <tr class="border-b">
+                    <td class="px-2 py-1">${escapeHtml(r.phone)}</td>
+                    <td class="px-2 py-1">${escapeHtml(r.name)}</td>
+                    <td class="px-2 py-1">${escapeHtml(r.email)}</td>
+                    <td class="px-2 py-1">${escapeHtml(r.tags)}</td>
+                </tr>
+            `).join('') + (importRecords.length > 10 ? `<tr><td colspan="4" class="px-2 py-1 text-gray-400">...and ${importRecords.length - 10} more</td></tr>` : '');
+
+            document.getElementById('import-preview').classList.remove('hidden');
+            document.getElementById('import-confirm-btn').disabled = false;
+        };
+        reader.readAsText(file);
+    }
+
+    async function confirmImport() {
+        if (!importRecords.length) return;
+        document.getElementById('import-confirm-btn').disabled = true;
+        document.getElementById('import-confirm-btn').textContent = 'Importing...';
+        try {
+            const res = await authFetch('/api/contacts/import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ records: importRecords }),
+            });
+            const data = await res.json();
+            const resultEl = document.getElementById('import-result');
+            resultEl.textContent = `Done! Created: ${data.created}, Updated: ${data.updated}, Total: ${data.total}`;
+            resultEl.className = 'text-sm mt-2 text-green-600';
+            resultEl.classList.remove('hidden');
+            loadContacts();
+            loadContactStats();
+            setTimeout(closeImportModal, 2000);
+        } catch (e) {
+            if (e.message !== 'Unauthorized') {
+                const resultEl = document.getElementById('import-result');
+                resultEl.textContent = 'Import failed: ' + e.message;
+                resultEl.className = 'text-sm mt-2 text-red-600';
+                resultEl.classList.remove('hidden');
+            }
+        } finally {
+            document.getElementById('import-confirm-btn').disabled = false;
+            document.getElementById('import-confirm-btn').textContent = 'Import';
         }
+    }
+
+    async function exportContacts() {
+        const stage = document.getElementById('contacts-stage-filter').value;
+        try {
+            const res = await authFetch(`/api/contacts/export${stage ? '?stage=' + stage : ''}`);
+            const data = await res.json();
+            const contacts = data.contacts || [];
+            if (!contacts.length) { alert('No contacts to export'); return; }
+
+            // Build CSV
+            const headers = ['phone', 'name', 'email', 'stage', 'source', 'tags', 'notes', 'ai_enabled', 'first_seen', 'last_seen'];
+            const rows = [headers.join(',')];
+            contacts.forEach(c => {
+                rows.push(headers.map(h => {
+                    let val = c[h] || '';
+                    if (typeof val === 'string' && (val.includes(',') || val.includes('"'))) {
+                        val = '"' + val.replace(/"/g, '""') + '"';
+                    }
+                    return val;
+                }).join(','));
+            });
+
+            const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `contacts${stage ? '_' + stage : ''}_${new Date().toISOString().slice(0,10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (e) { if (e.message !== 'Unauthorized') alert('Export failed: ' + e.message); }
+    }
+
+    // --- Campaigns ---
+
+    let currentCampaignId = null;
+    let campaignRecipientRecords = [];
+
+    async function loadCampaigns() {
+        const status = document.getElementById('campaigns-status-filter').value;
+        const params = new URLSearchParams({ limit: '100' });
+        if (status) params.set('status', status);
+        try {
+            const res = await authFetch(`/api/campaigns?${params}`);
+            const data = await res.json();
+            const campaigns = data.campaigns || [];
+            const tbody = document.getElementById('campaigns-body');
+            const empty = document.getElementById('campaigns-empty');
+            if (!campaigns.length) { tbody.innerHTML = ''; empty.classList.remove('hidden'); return; }
+            empty.classList.add('hidden');
+            tbody.innerHTML = campaigns.map(c => {
+                const statusCls = { 'draft': 'badge-expired', 'running': 'badge-active', 'paused': 'badge-handoff', 'completed': 'badge-completed', 'failed': 'badge-lost' }[c.status] || 'badge-expired';
+                return `
+                    <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="openCampaignDetail('${c.id}')">
+                        <td class="px-4 py-2 font-medium">${escapeHtml(c.name)}</td>
+                        <td class="px-4 py-2 text-xs font-mono">${escapeHtml(c.template_name)}</td>
+                        <td class="px-4 py-2"><span class="badge ${statusCls}">${c.status}</span></td>
+                        <td class="px-4 py-2">${c.recipient_count || 0}</td>
+                        <td class="px-4 py-2">${c.sent_count || 0}</td>
+                        <td class="px-4 py-2">${c.delivered_count || 0}</td>
+                        <td class="px-4 py-2 text-xs text-gray-500">${formatTime(c.created_at)}</td>
+                        <td class="px-4 py-2">
+                            ${c.status === 'draft' ? `<button onclick="event.stopPropagation(); quickStartCampaign('${c.id}')" class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200">Start</button>` : ''}
+                            ${c.status === 'running' ? `<button onclick="event.stopPropagation(); quickPauseCampaign('${c.id}')" class="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded hover:bg-yellow-200">Pause</button>` : ''}
+                        </td>
+                    </tr>`;
+            }).join('');
+        } catch (e) { if (e.message !== 'Unauthorized') console.error('Campaigns error:', e); }
+    }
+
+    function showCreateCampaignModal() {
+        document.getElementById('campaign-name').value = '';
+        document.getElementById('campaign-rate').value = '60';
+        document.getElementById('campaign-modal').classList.remove('hidden');
+        loadTemplateDropdown();
+    }
+
+    function closeCampaignModal() {
+        document.getElementById('campaign-modal').classList.add('hidden');
+    }
+
+    async function loadTemplateDropdown() {
+        const select = document.getElementById('campaign-template');
+        select.innerHTML = '<option value="">Loading...</option>';
+        try {
+            const res = await authFetch('/api/templates');
+            const data = await res.json();
+            const templates = (data.templates || []).filter(t => t.status === 'APPROVED');
+            if (!templates.length) {
+                select.innerHTML = '<option value="">No approved templates found</option>';
+                return;
+            }
+            select.innerHTML = templates.map(t =>
+                `<option value="${escapeHtml(t.name)}">${escapeHtml(t.name)} (${t.language})</option>`
+            ).join('');
+        } catch (e) {
+            select.innerHTML = '<option value="">Enter template name manually</option>';
+        }
+    }
+
+    async function createNewCampaign() {
+        const name = document.getElementById('campaign-name').value.trim();
+        let template = document.getElementById('campaign-template').value;
+        if (!template) template = prompt('Enter template name:');
+        if (!name || !template) { alert('Name and template are required'); return; }
+        try {
+            const res = await authFetch('/api/campaigns', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name,
+                    template_name: template,
+                    language: document.getElementById('campaign-language').value,
+                    rate_limit_per_min: parseInt(document.getElementById('campaign-rate').value) || 60,
+                }),
+            });
+            const campaign = await res.json();
+            closeCampaignModal();
+            loadCampaigns();
+            openCampaignDetail(campaign.id);
+        } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to create: ' + e.message); }
+    }
+
+    async function openCampaignDetail(campaignId) {
+        currentCampaignId = campaignId;
+        try {
+            const res = await authFetch(`/api/campaigns/${campaignId}`);
+            const c = await res.json();
+            document.getElementById('campaign-detail-title').textContent = c.name;
+            const stats = c.recipient_stats || {};
+            document.getElementById('cd-total').textContent = stats.total || 0;
+            document.getElementById('cd-sent').textContent = stats.sent || 0;
+            document.getElementById('cd-delivered').textContent = stats.delivered || 0;
+            document.getElementById('cd-failed').textContent = stats.failed || 0;
+            // Show/hide action buttons
+            const canStart = c.status === 'draft' || c.status === 'paused';
+            const isRunning = c.status === 'running';
+            document.getElementById('cd-start-btn').classList.toggle('hidden', !canStart);
+            document.getElementById('cd-pause-btn').classList.toggle('hidden', !isRunning);
+            document.getElementById('cd-upload-btn').classList.toggle('hidden', isRunning);
+            // Load recipients
+            const rRes = await authFetch(`/api/campaigns/${campaignId}/recipients?limit=200`);
+            const rData = await rRes.json();
+            const tbody = document.getElementById('cd-recipients-body');
+            const recipients = rData.recipients || [];
+            tbody.innerHTML = recipients.map(r => `
+                <tr class="border-b">
+                    <td class="px-3 py-1 font-mono">${escapeHtml(r.phone)}</td>
+                    <td class="px-3 py-1">${escapeHtml(r.name || '-')}</td>
+                    <td class="px-3 py-1"><span class="badge badge-${r.status === 'sent' || r.status === 'delivered' || r.status === 'read' ? 'completed' : r.status === 'failed' ? 'lost' : 'expired'}">${r.status}</span></td>
+                    <td class="px-3 py-1">${formatTimeShort(r.sent_at)}</td>
+                    <td class="px-3 py-1 text-red-500">${escapeHtml(r.error_message || '')}</td>
+                </tr>
+            `).join('') || '<tr><td colspan="5" class="px-3 py-4 text-center text-gray-400">No recipients yet</td></tr>';
+            document.getElementById('cd-upload-area').classList.add('hidden');
+            document.getElementById('campaign-detail-modal').classList.remove('hidden');
+        } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to load campaign: ' + e.message); }
+    }
+
+    function closeCampaignDetailModal() {
+        document.getElementById('campaign-detail-modal').classList.add('hidden');
+        currentCampaignId = null;
+    }
+
+    async function startCampaign() {
+        if (!currentCampaignId || !confirm('Start sending this campaign?')) return;
+        try {
+            await authFetch(`/api/campaigns/${currentCampaignId}/start`, { method: 'POST' });
+            openCampaignDetail(currentCampaignId);
+            loadCampaigns();
+        } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to start: ' + (await e.response?.text?.() || e.message)); }
+    }
+
+    async function pauseCampaign() {
+        if (!currentCampaignId) return;
+        try {
+            await authFetch(`/api/campaigns/${currentCampaignId}/pause`, { method: 'POST' });
+            openCampaignDetail(currentCampaignId);
+            loadCampaigns();
+        } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to pause: ' + e.message); }
+    }
+
+    async function quickStartCampaign(id) {
+        if (!confirm('Start this campaign?')) return;
+        try { await authFetch(`/api/campaigns/${id}/start`, { method: 'POST' }); loadCampaigns(); }
+        catch (e) { if (e.message !== 'Unauthorized') alert('Failed: ' + e.message); }
+    }
+
+    async function quickPauseCampaign(id) {
+        try { await authFetch(`/api/campaigns/${id}/pause`, { method: 'POST' }); loadCampaigns(); }
+        catch (e) { if (e.message !== 'Unauthorized') alert('Failed: ' + e.message); }
+    }
+
+    function showCampaignRecipientUpload() {
+        document.getElementById('cd-upload-area').classList.remove('hidden');
+        document.getElementById('cd-upload-file').value = '';
+        document.getElementById('cd-upload-preview').classList.add('hidden');
+        document.getElementById('cd-upload-confirm').disabled = true;
+        document.getElementById('cd-upload-result').textContent = '';
+        campaignRecipientRecords = [];
+    }
+
+    function previewCampaignRecipients() {
+        const file = document.getElementById('cd-upload-file').files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const lines = e.target.result.split('\n').map(l => l.trim()).filter(Boolean);
+            if (lines.length < 2) { alert('CSV needs header + data rows'); return; }
+            const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+            const phoneIdx = headers.indexOf('phone');
+            if (phoneIdx === -1) { alert('CSV must have a "phone" column'); return; }
+            const nameIdx = headers.indexOf('name');
+            campaignRecipientRecords = [];
+            for (let i = 1; i < lines.length; i++) {
+                const cols = lines[i].split(',').map(c => c.trim());
+                const phone = cols[phoneIdx] || '';
+                if (!phone) continue;
+                campaignRecipientRecords.push({ phone, name: nameIdx >= 0 ? (cols[nameIdx] || '') : '' });
+            }
+            document.getElementById('cd-upload-preview').textContent = `${campaignRecipientRecords.length} recipients found`;
+            document.getElementById('cd-upload-preview').classList.remove('hidden');
+            document.getElementById('cd-upload-confirm').disabled = false;
+        };
+        reader.readAsText(file);
+    }
+
+    async function confirmCampaignRecipients() {
+        if (!currentCampaignId || !campaignRecipientRecords.length) return;
+        document.getElementById('cd-upload-confirm').disabled = true;
+        try {
+            const res = await authFetch(`/api/campaigns/${currentCampaignId}/recipients`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ recipients: campaignRecipientRecords }),
+            });
+            const data = await res.json();
+            document.getElementById('cd-upload-result').textContent = `Added: ${data.added}, Duplicates: ${data.duplicate}, Invalid: ${data.invalid}`;
+            document.getElementById('cd-upload-result').className = 'text-sm ml-2 text-green-600';
+            openCampaignDetail(currentCampaignId);
+        } catch (e) {
+            document.getElementById('cd-upload-result').textContent = 'Upload failed';
+            document.getElementById('cd-upload-result').className = 'text-sm ml-2 text-red-600';
+        }
+    }
+
+    async function exportCampaignResults() {
+        if (!currentCampaignId) return;
+        try {
+            const res = await authFetch(`/api/campaigns/${currentCampaignId}/results`);
+            const data = await res.json();
+            const results = data.results || [];
+            if (!results.length) { alert('No results to export'); return; }
+            const headers = ['phone', 'name', 'status', 'sent_at', 'delivered_at', 'read_at', 'error_message'];
+            const rows = [headers.join(',')];
+            results.forEach(r => {
+                rows.push(headers.map(h => { let v = r[h] || ''; if (typeof v === 'string' && v.includes(',')) v = '"' + v + '"'; return v; }).join(','));
+            });
+            const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = `campaign_results_${currentCampaignId.substring(0,8)}.csv`; a.click();
+            URL.revokeObjectURL(url);
+        } catch (e) { if (e.message !== 'Unauthorized') alert('Export failed: ' + e.message); }
+    }
+
+    async function deleteCampaignFromDetail() {
+        if (!currentCampaignId || !confirm('Delete this campaign and all its recipients?')) return;
+        try {
+            await authFetch(`/api/campaigns/${currentCampaignId}`, { method: 'DELETE' });
+            closeCampaignDetailModal();
+            loadCampaigns();
+        } catch (e) { if (e.message !== 'Unauthorized') alert('Delete failed: ' + e.message); }
+    }
+
+    // --- Orders ---
+
+    async function loadOrderStats() {
+        try {
+            const res = await authFetch('/api/orders/stats');
+            const data = await res.json();
+            document.getElementById('order-stat-total').textContent = data.total || 0;
+            document.getElementById('order-stat-pending').textContent = data.pending || 0;
+            document.getElementById('order-stat-payment_sent').textContent = data.payment_sent || 0;
+            document.getElementById('order-stat-payment_completed').textContent = data.payment_completed || 0;
+            document.getElementById('order-stat-failed').textContent = data.failed || 0;
+            document.getElementById('order-stat-revenue').textContent = data.total_revenue ? `₹${Number(data.total_revenue).toLocaleString('en-IN')}` : '₹0';
+        } catch (e) { if (e.message !== 'Unauthorized') console.error('Order stats error:', e); }
+    }
+
+    async function loadOrders() {
+        try {
+            const res = await authFetch('/api/orders?limit=100');
+            const data = await res.json();
+            const orders = data.orders || [];
+            const tbody = document.getElementById('orders-body');
+            const empty = document.getElementById('orders-empty');
+            if (!orders.length) { tbody.innerHTML = ''; empty.classList.remove('hidden'); return; }
+            empty.classList.add('hidden');
+            tbody.innerHTML = orders.map(o => {
+                const statusCls = { 'pending': 'badge-handoff', 'payment_sent': 'badge-active', 'payment_completed': 'badge-completed', 'failed': 'badge-lost' }[o.status] || 'badge-expired';
+                const items = Array.isArray(o.items) ? o.items : [];
+                return `
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="px-4 py-2 font-mono text-xs">${escapeHtml((o.id || '').substring(0, 8))}</td>
+                        <td class="px-4 py-2">${escapeHtml(o.name || '-')}</td>
+                        <td class="px-4 py-2 font-mono text-xs">${escapeHtml(o.phone || '-')}</td>
+                        <td class="px-4 py-2 font-medium">₹${Number(o.total_amount || 0).toLocaleString('en-IN')}</td>
+                        <td class="px-4 py-2"><span class="badge ${statusCls}">${(o.status || '').replace('_', ' ')}</span></td>
+                        <td class="px-4 py-2 text-xs">${o.payment_link ? `<a href="${escapeHtml(o.payment_link)}" target="_blank" class="text-blue-500 underline">Link</a>` : '-'}</td>
+                        <td class="px-4 py-2 text-xs text-gray-500">${formatTime(o.created_at)}</td>
+                    </tr>`;
+            }).join('');
+        } catch (e) { if (e.message !== 'Unauthorized') console.error('Orders error:', e); }
     }
 
     // --- Stats ---
@@ -508,7 +1444,7 @@
             document.getElementById('editor-content').value = data.content;
             document.getElementById('editor-actions').classList.remove('hidden');
             document.getElementById('editor-status').textContent = '';
-            loadKnowledgeFiles(); // refresh sidebar to highlight active
+            loadKnowledgeFiles();
         } catch (e) { if (e.message !== 'Unauthorized') console.error('File open error:', e); }
     }
 
@@ -538,12 +1474,7 @@
             });
             await loadKnowledgeFiles();
             openKnowledgeFile(filename);
-        } catch (e) {
-            if (e.message !== 'Unauthorized') {
-                const res = e.response || {};
-                alert('Failed to create file: ' + (e.message || 'unknown error'));
-            }
-        }
+        } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to create file: ' + e.message); }
     }
 
     async function renameCurrentFile() {
@@ -580,7 +1511,11 @@
     // --- Refresh ---
 
     async function refreshAll() {
-        await Promise.all([loadStats(), loadCalls(), loadChats()]);
+        await Promise.all([loadStats(), loadCalls()]);
+        if (currentTab === 'inbox') loadInbox();
+        if (currentTab === 'contacts') { loadContacts(); loadContactStats(); }
+        if (currentTab === 'campaigns') loadCampaigns();
+        if (currentTab === 'orders') { loadOrders(); loadOrderStats(); }
         document.getElementById('last-refresh').textContent = 'Updated ' + new Date().toLocaleTimeString();
     }
 

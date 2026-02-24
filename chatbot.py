@@ -51,6 +51,7 @@ async def handle_text_message(
     message_text: str,
     wa_message_id: str,
     knowledge_context: str,
+    contact_id: str = "",
 ):
     """Process an incoming WhatsApp text message and reply with GPT-4o.
 
@@ -60,6 +61,7 @@ async def handle_text_message(
         message_text: The text message content
         wa_message_id: WhatsApp message ID (for dedup + read receipts)
         knowledge_context: Knowledge base content for the system prompt
+        contact_id: Contact ID from contacts table (for linking)
     """
     logger.info(f"Chat from {sender_phone} ({sender_name}): {message_text[:100]}")
 
@@ -73,12 +75,12 @@ async def handle_text_message(
         return
 
     # 3. Get or create conversation
-    conversation = await get_or_create_conversation(sender_phone, sender_name)
+    conversation = await get_or_create_conversation(sender_phone, sender_name, contact_id)
     conv_id = conversation["id"]
     logger.info(f"Conversation {conv_id} for {sender_phone}")
 
     # 4. Store user message
-    await add_message(conv_id, "user", message_text, wa_message_id)
+    await add_message(conv_id, "user", message_text, wa_message_id, direction="inbound", source="user")
 
     # 5. Load recent messages for context
     recent_messages = await get_recent_messages(conv_id, limit=10)
@@ -87,7 +89,7 @@ async def handle_text_message(
     reply_text = await _call_gpt4o(knowledge_context, recent_messages)
 
     # 7. Store assistant reply
-    await add_message(conv_id, "assistant", reply_text)
+    await add_message(conv_id, "assistant", reply_text, direction="outbound", source="ai")
 
     # 8. Send reply via WhatsApp
     sent = await send_whatsapp_text(sender_phone, reply_text)
