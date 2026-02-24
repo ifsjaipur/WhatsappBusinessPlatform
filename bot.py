@@ -30,8 +30,9 @@ from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
-from db import complete_call_record, create_call_record, generate_call_id
+from db import complete_call_record, create_call_record
 from hooks import send_call_summary
+from utils import detect_handoff, extract_topics, generate_id
 from whatsapp_messaging import send_followup_message
 
 load_dotenv(override=True)
@@ -56,53 +57,6 @@ YOUR KNOWLEDGE:
 {knowledge}
 """
 
-# Phrases that indicate the caller explicitly asked for a human agent.
-# Only trigger on clear handoff commitments, not general "connect with admissions" responses.
-HANDOFF_PHRASES = [
-    "someone will call you back",
-    "have someone call you back",
-    "let our team know",
-    "our team will contact you",
-    "transfer you to",
-    "connect you with a person",
-]
-
-# Keywords for topic extraction from transcript
-TOPIC_KEYWORDS = {
-    "courses": ["course", "program", "certification", "class", "training", "study"],
-    "admissions": ["admission", "enroll", "registration", "apply", "seat", "batch"],
-    "fees": ["fee", "cost", "price", "payment", "installment", "scholarship"],
-    "placements": ["placement", "job", "career", "salary", "hiring"],
-    "corporate_training": ["corporate", "company", "organization", "team training"],
-    "schedule": ["timing", "schedule", "when", "date", "start", "duration"],
-    "location": ["address", "location", "where", "office", "branch", "jaipur"],
-    "contact": ["phone", "email", "contact", "call back", "reach"],
-}
-
-
-def detect_handoff(transcript: list) -> tuple[bool, str]:
-    """Check if any assistant message indicates handoff was triggered."""
-    for msg in transcript:
-        if msg["role"] == "assistant":
-            content_lower = msg["content"].lower()
-            for phrase in HANDOFF_PHRASES:
-                if phrase in content_lower:
-                    return True, f"Assistant offered handoff: '{phrase}'"
-    return False, ""
-
-
-def extract_topics(transcript: list) -> list[str]:
-    """Extract key topics from transcript using keyword matching."""
-    all_text = " ".join(
-        msg["content"].lower() for msg in transcript if msg.get("content")
-    )
-    found = []
-    for topic, keywords in TOPIC_KEYWORDS.items():
-        if any(kw in all_text for kw in keywords):
-            found.append(topic)
-    return found
-
-
 async def run_bot(
     webrtc_connection,
     knowledge_context: str = "",
@@ -114,7 +68,7 @@ async def run_bot(
     Captures transcript, records audio, detects handoff requests,
     stores everything in SQLite, and sends post-call notifications.
     """
-    call_id = generate_call_id()
+    call_id = generate_id()
     logger.info(f"Call {call_id}: Starting bot for {caller_phone} ({caller_name})")
 
     system_instruction = AGENT_RULES.format(

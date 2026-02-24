@@ -21,7 +21,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create directories for persistent data (mount as volumes in production)
-RUN mkdir -p recordings data
+RUN mkdir -p recordings data static
 
 EXPOSE 7860
 

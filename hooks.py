@@ -1,6 +1,6 @@
-"""Post-Call Hooks
+"""Post-Call/Chat Hooks
 
-Sends enriched call data to n8n webhook after each call ends.
+Sends enriched call and chat data to n8n webhooks.
 n8n can then trigger automations: email brief, Telegram notification,
 Google Sheet log, lead creation, handoff alerts, etc.
 """
@@ -11,6 +11,7 @@ import aiohttp
 from loguru import logger
 
 N8N_CALL_HOOK_URL = os.getenv("N8N_CALL_HOOK_URL", "")
+N8N_CHAT_HOOK_URL = os.getenv("N8N_CHAT_HOOK_URL", "")
 
 
 async def send_call_summary(call_data: dict):
@@ -64,3 +65,48 @@ async def send_call_summary(call_data: dict):
                     logger.warning(f"n8n hook returned {resp.status}: {body}")
     except Exception as e:
         logger.error(f"Failed to send call summary to n8n: {e}")
+
+
+async def send_chat_summary(chat_data: dict):
+    """Send chat handoff notification to n8n.
+
+    Args:
+        chat_data: Dict with:
+            - conversation_id, phone, name
+            - handoff_requested (bool), handoff_reason (str)
+            - topics (list), message_count (int), last_message (str)
+    """
+    if not N8N_CHAT_HOOK_URL:
+        logger.debug("N8N_CHAT_HOOK_URL not set, skipping chat summary hook")
+        return
+
+    payload = {
+        "event": "chat_handoff",
+        "conversation_id": chat_data.get("conversation_id", ""),
+        "contact": {
+            "phone": chat_data.get("phone", ""),
+            "name": chat_data.get("name", ""),
+        },
+        "handoff": {
+            "requested": chat_data.get("handoff_requested", False),
+            "reason": chat_data.get("handoff_reason", ""),
+        },
+        "topics": chat_data.get("topics", []),
+        "message_count": chat_data.get("message_count", 0),
+        "last_message": chat_data.get("last_message", ""),
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                N8N_CHAT_HOOK_URL,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status == 200:
+                    logger.info(f"Chat summary sent to n8n: conv={chat_data.get('conversation_id')}")
+                else:
+                    body = await resp.text()
+                    logger.warning(f"n8n chat hook returned {resp.status}: {body}")
+    except Exception as e:
+        logger.error(f"Failed to send chat summary to n8n: {e}")

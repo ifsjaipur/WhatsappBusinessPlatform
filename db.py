@@ -5,7 +5,7 @@ Database file is stored at data/calls.db.
 """
 
 import json
-import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import aiosqlite
@@ -16,7 +16,7 @@ DB_PATH = DB_DIR / "calls.db"
 
 
 async def init_db():
-    """Create tables if they don't exist. Called once at server startup."""
+    """Create all tables. Called once at server startup."""
     DB_DIR.mkdir(exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
@@ -37,12 +37,12 @@ async def init_db():
             )
         """)
         await db.commit()
+
+    # Initialize chat tables (conversations + messages)
+    from chat_db import init_chat_tables
+    await init_chat_tables()
+
     logger.info(f"Database initialized at {DB_PATH}")
-
-
-def generate_call_id() -> str:
-    """Generate a unique call ID."""
-    return str(uuid.uuid4())
 
 
 async def create_call_record(call_id: str, caller_phone: str, caller_name: str, connected_at: str):
@@ -106,3 +106,56 @@ async def get_recent_calls(limit: int = 50) -> list[dict]:
                             pass
                 results.append(record)
             return results
+
+
+async def resolve_call(call_id: str):
+    """Mark a call's handoff as resolved."""
+    now = datetime.now(timezone.utc).isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE calls SET status = 'resolved' WHERE id = ?",
+            (call_id,),
+        )
+        await db.commit()
+    logger.info(f"Call {call_id} resolved")
+
+
+async def get_stats() -> dict:
+    """Get aggregate stats for the dashboard."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Calls today
+        async with db.execute(
+            "SELECT COUNT(*) FROM calls WHERE date(created_at) = date('now')"
+        ) as cursor:
+            calls_today = (await cursor.fetchone())[0]
+
+        # Avg call duration
+        async with db.execute(
+            "SELECT AVG(duration_seconds) FROM calls WHERE duration_seconds > 0"
+        ) as cursor:
+            avg_duration = (await cursor.fetchone())[0] or 0
+
+        # Pending handoffs (calls)
+        async with db.execute(
+            "SELECT COUNT(*) FROM calls WHERE status = 'handoff_pending'"
+        ) as cursor:
+            call_handoffs = (await cursor.fetchone())[0]
+
+        # Chats today
+        async with db.execute(
+            "SELECT COUNT(*) FROM conversations WHERE date(created_at) = date('now')"
+        ) as cursor:
+            chats_today = (await cursor.fetchone())[0]
+
+        # Pending handoffs (chats)
+        async with db.execute(
+            "SELECT COUNT(*) FROM conversations WHERE status = 'handoff_pending'"
+        ) as cursor:
+            chat_handoffs = (await cursor.fetchone())[0]
+
+        return {
+            "calls_today": calls_today,
+            "chats_today": chats_today,
+            "pending_handoffs": call_handoffs + chat_handoffs,
+            "avg_call_duration": round(avg_duration, 1),
+        }

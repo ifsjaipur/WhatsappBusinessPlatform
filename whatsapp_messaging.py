@@ -70,6 +70,49 @@ async def send_whatsapp_text(to_phone: str, message: str) -> bool:
         return False
 
 
+async def mark_message_as_read(message_id: str) -> bool:
+    """Send read receipt (blue ticks) for a WhatsApp message.
+
+    Args:
+        message_id: The wamid of the incoming message.
+
+    Returns:
+        True if read receipt was sent successfully.
+    """
+    if not all([WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID]):
+        return False
+
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "status": "read",
+        "message_id": message_id,
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                WHATSAPP_API_URL,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status == 200:
+                    logger.debug(f"Read receipt sent for {message_id}")
+                    return True
+                else:
+                    body = await resp.text()
+                    logger.warning(f"Read receipt failed {resp.status}: {body}")
+                    return False
+    except Exception as e:
+        logger.error(f"Failed to send read receipt: {e}")
+        return False
+
+
 async def send_followup_message(
     caller_phone: str,
     caller_name: str,

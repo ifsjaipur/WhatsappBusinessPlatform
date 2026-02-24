@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IFS Voice Agent Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .tab-active { border-bottom: 2px solid #3b82f6; color: #3b82f6; font-weight: 600; }
+        .transcript-row { display: none; }
+        .transcript-row.open { display: table-row; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: 500; }
+        .badge-completed { background: #dcfce7; color: #166534; }
+        .badge-active { background: #dbeafe; color: #1e40af; }
+        .badge-handoff { background: #fef3c7; color: #92400e; }
+        .badge-resolved { background: #e0e7ff; color: #3730a3; }
+        .badge-expired { background: #f3f4f6; color: #6b7280; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <nav class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div>
+                <h1 class="text-lg font-bold text-gray-900">IFS Voice Agent</h1>
+                <p class="text-xs text-gray-500">WhatsApp AI Dashboard</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <span id="last-refresh" class="text-xs text-gray-400"></span>
+                <button onclick="refreshAll()" class="text-sm bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600">Refresh</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Stats -->
+    <div class="max-w-7xl mx-auto px-4 mt-4">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="bg-white rounded-lg shadow-sm p-4 border">
+                <p class="text-sm text-gray-500">Calls Today</p>
+                <p id="stat-calls" class="text-2xl font-bold text-gray-900">-</p>
+            </div>
+            <div class="bg-white rounded-lg shadow-sm p-4 border">
+                <p class="text-sm text-gray-500">Chats Today</p>
+                <p id="stat-chats" class="text-2xl font-bold text-gray-900">-</p>
+            </div>
+            <div class="bg-white rounded-lg shadow-sm p-4 border">
+                <p class="text-sm text-gray-500">Pending Handoffs</p>
+                <p id="stat-handoffs" class="text-2xl font-bold text-orange-600">-</p>
+            </div>
+            <div class="bg-white rounded-lg shadow-sm p-4 border">
+                <p class="text-sm text-gray-500">Avg Call Duration</p>
+                <p id="stat-duration" class="text-2xl font-bold text-gray-900">-</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="max-w-7xl mx-auto px-4 mt-6">
+        <div class="flex border-b">
+            <button id="tab-calls" onclick="switchTab('calls')" class="px-4 py-2 text-sm tab-active">Calls</button>
+            <button id="tab-chats" onclick="switchTab('chats')" class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Chats</button>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="max-w-7xl mx-auto px-4 mt-3 flex gap-3 items-center">
+        <select id="filter-status" onchange="refreshAll()" class="text-sm border rounded px-2 py-1">
+            <option value="">All Status</option>
+            <option value="completed">Completed</option>
+            <option value="active">Active</option>
+            <option value="handoff_pending">Handoff Pending</option>
+            <option value="resolved">Resolved</option>
+        </select>
+    </div>
+
+    <!-- Calls Table -->
+    <div id="panel-calls" class="max-w-7xl mx-auto px-4 mt-3">
+        <div class="bg-white rounded-lg shadow-sm border overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-gray-50 border-b">
+                    <tr>
+                        <th class="text-left px-4 py-2 font-medium text-gray-600">Caller</th>
+                        <th class="text-left px-4 py-2 font-medium text-gray-600">Phone</th>
+                        <th class="text-left px-4 py-2 font-medium text-gray-600">Duration</th>
+                        <th class="text-left px-4 py-2 font-medium text-gray-600">Status</th>
+                        <th class="text-left px-4 py-2 font-medium text-gray-600">Topics</th>
+                        <th class="text-left px-4 py-2 font-medium text-gray-600">Time</th>
+                        <th class="text-left px-4 py-2 font-medium text-gray-600">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="calls-body"></tbody>
+            </table>
+            <div id="calls-empty" class="hidden text-center py-8 text-gray-400">No calls found</div>
+        </div>
+    </div>
+
+    <!-- Chats Table -->
+    <div id="panel-chats" class="max-w-7xl mx-auto px-4 mt-3 hidden">
+        <div class="bg-white rounded-lg shadow-sm border overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-gray-50 border-b">
+                    <tr>
+                        <th class="text-left px-4 py-2 font-medium text-gray-600">Name</th>
+                        <th class="text-left px-4 py-2 font-medium text-gray-600">Phone</th>
+                        <th class="text-left px-4 py-2 font-medium text-gray-600">Messages</th>
+                        <th class="text-left px-4 py-2 font-medium text-gray-600">Status</th>
+                        <th class="text-left px-4 py-2 font-medium text-gray-600">Topics</th>
+                        <th class="text-left px-4 py-2 font-medium text-gray-600">Last Active</th>
+                        <th class="text-left px-4 py-2 font-medium text-gray-600">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="chats-body"></tbody>
+            </table>
+            <div id="chats-empty" class="hidden text-center py-8 text-gray-400">No conversations found</div>
+        </div>
+    </div>
+
+    <div class="h-16"></div>
+
+    <script>
+    let currentTab = 'calls';
+
+    function switchTab(tab) {
+        currentTab = tab;
+        document.getElementById('tab-calls').className = tab === 'calls' ? 'px-4 py-2 text-sm tab-active' : 'px-4 py-2 text-sm text-gray-500 hover:text-gray-700';
+        document.getElementById('tab-chats').className = tab === 'chats' ? 'px-4 py-2 text-sm tab-active' : 'px-4 py-2 text-sm text-gray-500 hover:text-gray-700';
+        document.getElementById('panel-calls').className = tab === 'calls' ? 'max-w-7xl mx-auto px-4 mt-3' : 'max-w-7xl mx-auto px-4 mt-3 hidden';
+        document.getElementById('panel-chats').className = tab === 'chats' ? 'max-w-7xl mx-auto px-4 mt-3' : 'max-w-7xl mx-auto px-4 mt-3 hidden';
+    }
+
+    function statusBadge(status) {
+        const cls = {
+            'completed': 'badge-completed',
+            'active': 'badge-active',
+            'handoff_pending': 'badge-handoff',
+            'resolved': 'badge-resolved',
+            'expired': 'badge-expired',
+        }[status] || 'badge-completed';
+        const label = status ? status.replace('_', ' ') : 'unknown';
+        return `<span class="badge ${cls}">${label}</span>`;
+    }
+
+    function topicBadges(topics) {
+        if (!topics || !topics.length) return '<span class="text-gray-300">-</span>';
+        return topics.map(t => `<span class="badge bg-gray-100 text-gray-600">${t}</span>`).join(' ');
+    }
+
+    function formatDuration(seconds) {
+        if (!seconds) return '-';
+        const m = Math.floor(seconds / 60);
+        const s = Math.round(seconds % 60);
+        return m > 0 ? `${m}m ${s}s` : `${s}s`;
+    }
+
+    function formatTime(iso) {
+        if (!iso) return '-';
+        try {
+            const d = new Date(iso);
+            return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+        } catch { return iso; }
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function toggleTranscript(id) {
+        const row = document.getElementById('transcript-' + id);
+        if (row) row.classList.toggle('open');
+    }
+
+    function renderTranscript(transcript) {
+        if (!transcript || !transcript.length) return '<p class="text-gray-400 italic">No transcript available</p>';
+        return transcript.map(m => {
+            const isUser = m.role === 'user';
+            const label = isUser ? 'Caller' : 'AI';
+            const color = isUser ? 'text-blue-700' : 'text-green-700';
+            return `<div class="mb-2"><span class="font-medium ${color}">${label}:</span> ${escapeHtml(m.content)}</div>`;
+        }).join('');
+    }
+
+    async function resolveCall(callId) {
+        if (!confirm('Mark this handoff as resolved?')) return;
+        try {
+            await fetch(`/api/calls/${callId}/resolve`, { method: 'PATCH' });
+            refreshAll();
+        } catch (e) { alert('Failed to resolve: ' + e.message); }
+    }
+
+    async function resolveConversation(convId) {
+        if (!confirm('Mark this handoff as resolved?')) return;
+        try {
+            await fetch(`/api/conversations/${convId}/resolve`, { method: 'PATCH' });
+            refreshAll();
+        } catch (e) { alert('Failed to resolve: ' + e.message); }
+    }
+
+    async function loadStats() {
+        try {
+            const res = await fetch('/api/stats');
+            const data = await res.json();
+            document.getElementById('stat-calls').textContent = data.calls_today;
+            document.getElementById('stat-chats').textContent = data.chats_today;
+            document.getElementById('stat-handoffs').textContent = data.pending_handoffs;
+            document.getElementById('stat-duration').textContent = formatDuration(data.avg_call_duration);
+        } catch (e) { console.error('Stats error:', e); }
+    }
+
+    async function loadCalls() {
+        const statusFilter = document.getElementById('filter-status').value;
+        try {
+            const res = await fetch('/calls?limit=100');
+            const data = await res.json();
+            let calls = data.calls || [];
+
+            if (statusFilter) {
+                calls = calls.filter(c => c.status === statusFilter);
+            }
+
+            const tbody = document.getElementById('calls-body');
+            const empty = document.getElementById('calls-empty');
+
+            if (!calls.length) {
+                tbody.innerHTML = '';
+                empty.classList.remove('hidden');
+                return;
+            }
+            empty.classList.add('hidden');
+
+            tbody.innerHTML = calls.map(c => {
+                const hasTranscript = c.transcript && c.transcript.length;
+                const hasRecording = c.recording_path;
+                const isHandoff = c.status === 'handoff_pending';
+                return `
+                    <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="toggleTranscript('call-${c.id}')">
+                        <td class="px-4 py-2">${escapeHtml(c.caller_name || '-')}</td>
+                        <td class="px-4 py-2 font-mono text-xs">${escapeHtml(c.caller_phone || '-')}</td>
+                        <td class="px-4 py-2">${formatDuration(c.duration_seconds)}</td>
+                        <td class="px-4 py-2">${statusBadge(c.status)}</td>
+                        <td class="px-4 py-2">${topicBadges(c.topics)}</td>
+                        <td class="px-4 py-2 text-xs text-gray-500">${formatTime(c.connected_at || c.created_at)}</td>
+                        <td class="px-4 py-2">
+                            ${isHandoff ? `<button onclick="event.stopPropagation(); resolveCall('${c.id}')" class="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded hover:bg-orange-200">Resolve</button>` : ''}
+                        </td>
+                    </tr>
+                    <tr id="transcript-call-${c.id}" class="transcript-row">
+                        <td colspan="7" class="px-4 py-3 bg-gray-50">
+                            <div class="max-w-3xl">
+                                <h4 class="font-medium text-gray-700 mb-2">Transcript</h4>
+                                <div class="bg-white border rounded p-3 max-h-64 overflow-y-auto text-sm">
+                                    ${renderTranscript(c.transcript)}
+                                </div>
+                                ${hasRecording ? `
+                                <div class="mt-2">
+                                    <h4 class="font-medium text-gray-700 mb-1">Recording</h4>
+                                    <audio controls class="w-full" src="/${c.recording_path}"></audio>
+                                </div>` : ''}
+                            </div>
+                        </td>
+                    </tr>`;
+            }).join('');
+        } catch (e) { console.error('Calls error:', e); }
+    }
+
+    async function loadChats() {
+        const statusFilter = document.getElementById('filter-status').value;
+        try {
+            const res = await fetch('/api/conversations?limit=100');
+            const data = await res.json();
+            let convs = data.conversations || [];
+
+            if (statusFilter) {
+                convs = convs.filter(c => c.status === statusFilter);
+            }
+
+            const tbody = document.getElementById('chats-body');
+            const empty = document.getElementById('chats-empty');
+
+            if (!convs.length) {
+                tbody.innerHTML = '';
+                empty.classList.remove('hidden');
+                return;
+            }
+            empty.classList.add('hidden');
+
+            tbody.innerHTML = convs.map(c => {
+                const isHandoff = c.status === 'handoff_pending';
+                return `
+                    <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="loadConversationMessages('${c.id}')">
+                        <td class="px-4 py-2">${escapeHtml(c.name || '-')}</td>
+                        <td class="px-4 py-2 font-mono text-xs">${escapeHtml(c.phone || '-')}</td>
+                        <td class="px-4 py-2">${c.message_count || 0}</td>
+                        <td class="px-4 py-2">${statusBadge(c.status)}</td>
+                        <td class="px-4 py-2">${topicBadges(c.topics)}</td>
+                        <td class="px-4 py-2 text-xs text-gray-500">${formatTime(c.last_message_at)}</td>
+                        <td class="px-4 py-2">
+                            ${isHandoff ? `<button onclick="event.stopPropagation(); resolveConversation('${c.id}')" class="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded hover:bg-orange-200">Resolve</button>` : ''}
+                        </td>
+                    </tr>
+                    <tr id="transcript-chat-${c.id}" class="transcript-row">
+                        <td colspan="7" class="px-4 py-3 bg-gray-50">
+                            <div class="max-w-3xl">
+                                <h4 class="font-medium text-gray-700 mb-2">Messages</h4>
+                                <div id="messages-${c.id}" class="bg-white border rounded p-3 max-h-64 overflow-y-auto text-sm">
+                                    <p class="text-gray-400">Loading...</p>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>`;
+            }).join('');
+        } catch (e) { console.error('Chats error:', e); }
+    }
+
+    async function loadConversationMessages(convId) {
+        const row = document.getElementById('transcript-chat-' + convId);
+        if (row) {
+            row.classList.toggle('open');
+            if (row.classList.contains('open')) {
+                try {
+                    const res = await fetch(`/api/conversations/${convId}`);
+                    const data = await res.json();
+                    const container = document.getElementById('messages-' + convId);
+                    if (data.messages && data.messages.length) {
+                        container.innerHTML = renderTranscript(data.messages);
+                    } else {
+                        container.innerHTML = '<p class="text-gray-400 italic">No messages</p>';
+                    }
+                } catch (e) {
+                    console.error('Messages error:', e);
+                }
+            }
+        }
+    }
+
+    async function refreshAll() {
+        await Promise.all([loadStats(), loadCalls(), loadChats()]);
+        document.getElementById('last-refresh').textContent = 'Updated ' + new Date().toLocaleTimeString();
+    }
+
+    // Initial load
+    refreshAll();
+
+    // Auto-refresh every 30 seconds
+    setInterval(refreshAll, 30000);
+    </script>
+</body>
+</html>
