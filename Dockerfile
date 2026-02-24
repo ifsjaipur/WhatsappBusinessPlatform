@@ -2,6 +2,7 @@ FROM python:3.12-slim
 
 # System dependencies for aiortc (WebRTC) and audio processing
 RUN apt-get update && apt-get install -y \
+    curl \
     libavformat-dev \
     libavcodec-dev \
     libavdevice-dev \
