@@ -56,17 +56,15 @@ YOUR KNOWLEDGE:
 {knowledge}
 """
 
-# Phrases the assistant naturally says when a handoff is needed.
-# These match the agent rules above so no artificial markers are required.
+# Phrases that indicate the caller explicitly asked for a human agent.
+# Only trigger on clear handoff commitments, not general "connect with admissions" responses.
 HANDOFF_PHRASES = [
-    "connect you with our team",
-    "connect you with our admissions",
+    "someone will call you back",
     "have someone call you back",
     "let our team know",
-    "someone will call you back",
-    "our team will contact",
-    "speak to a person",
-    "transfer you",
+    "our team will contact you",
+    "transfer you to",
+    "connect you with a person",
 ]
 
 # Keywords for topic extraction from transcript
@@ -178,28 +176,31 @@ async def run_bot(
     )
 
     # Call session state
+    recording_filename = f"{call_id}.wav"
+    recording_rel_path = f"recordings/{recording_filename}"
     call_metadata = {
         "call_id": call_id,
         "caller_phone": caller_phone,
         "caller_name": caller_name,
         "connected_at": None,
         "disconnected_at": None,
-        "recording_path": "",
     }
 
     @audiobuffer.event_handler("on_audio_data")
     async def on_audio_data(buffer, audio, sample_rate, num_channels):
         """Save recorded audio to WAV file when recording stops."""
-        recording_filename = f"{call_id}.wav"
         recording_path = RECORDINGS_DIR / recording_filename
+        logger.info(f"Call {call_id}: on_audio_data fired — {len(audio) if audio else 0} bytes, {sample_rate}Hz, {num_channels}ch")
+        if not audio:
+            logger.warning(f"Call {call_id}: Empty audio buffer, skipping save")
+            return
         try:
             with wave.open(str(recording_path), "wb") as wf:
                 wf.setnchannels(num_channels)
                 wf.setsampwidth(2)  # 16-bit audio
                 wf.setframerate(sample_rate)
                 wf.writeframes(audio)
-            call_metadata["recording_path"] = f"recordings/{recording_filename}"
-            logger.info(f"Call {call_id}: Audio saved to {recording_path}")
+            logger.info(f"Call {call_id}: Audio saved to {recording_path} ({recording_path.stat().st_size} bytes)")
         except Exception as e:
             logger.error(f"Call {call_id}: Failed to save audio: {e}")
 
@@ -270,7 +271,7 @@ async def run_bot(
                 disconnected_at=call_metadata["disconnected_at"],
                 duration_seconds=duration_seconds,
                 transcript=json.dumps(transcript, ensure_ascii=False),
-                recording_path=call_metadata.get("recording_path", ""),
+                recording_path=recording_rel_path,
                 handoff_requested=1 if handoff_requested else 0,
                 handoff_reason=handoff_reason,
                 topics=json.dumps(topics, ensure_ascii=False),
@@ -300,7 +301,7 @@ async def run_bot(
                 "handoff_requested": handoff_requested,
                 "handoff_reason": handoff_reason,
                 "topics": topics,
-                "recording_path": call_metadata.get("recording_path", ""),
+                "recording_path": recording_rel_path,
             })
         except Exception as e:
             logger.error(f"Call {call_id}: Failed to send to n8n: {e}")
