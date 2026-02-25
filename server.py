@@ -86,6 +86,7 @@ from orders_db import get_order, get_order_stats, list_orders as list_orders_db
 from whatsapp_messaging import (
     get_whatsapp_templates,
     send_interactive_message,
+    send_whatsapp_template,
     send_whatsapp_text,
 )
 
@@ -634,6 +635,76 @@ async def send_manual_message(request: Request):
 
     logger.info(f"Manual reply sent to {phone} in conv {conversation_id}")
     return {"status": "sent", "message_id": msg_id, "phone": phone}
+
+
+@app.post("/api/messages/send-direct", dependencies=[Depends(require_auth_csrf)])
+async def send_direct_message(request: Request):
+    """Send a message to a phone number directly (e.g. from Calls panel).
+
+    Auto-creates or finds an existing conversation for the phone number.
+    Body: { "phone": "919876543210", "name": "John", "message": "..." }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    phone = body.get("phone", "").strip()
+    message_text = body.get("message", "").strip()
+    name = body.get("name", "").strip()
+
+    if not phone or not message_text:
+        raise HTTPException(status_code=400, detail="phone and message are required")
+
+    # Send via WhatsApp first
+    sent = await send_whatsapp_text(phone, message_text)
+    if not sent:
+        raise HTTPException(status_code=502, detail="Failed to send WhatsApp message")
+
+    # Get or create a conversation for this phone
+    conv = await get_or_create_conversation(phone, name)
+
+    # Store the message in the conversation
+    msg_id = await add_message(
+        conv["id"], "assistant", message_text,
+        direction="outbound", source="manual",
+    )
+
+    logger.info(f"Direct message sent to {phone} (conv {conv['id']})")
+    return {
+        "status": "sent",
+        "message_id": msg_id,
+        "phone": phone,
+        "conversation_id": conv["id"],
+    }
+
+
+@app.post("/api/messages/send-template", dependencies=[Depends(require_auth_csrf)])
+async def api_send_template_direct(request: Request):
+    """Send a template message to a phone number.
+
+    Body: { "to": "919876543210", "template_name": "hello_world", "language": "en", "components": [...] }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    to_phone = body.get("to", "").strip()
+    template_name = body.get("template_name", "").strip()
+    if not to_phone or not template_name:
+        raise HTTPException(status_code=400, detail="to and template_name are required")
+
+    result = await send_whatsapp_template(
+        to_phone=to_phone,
+        template_name=template_name,
+        language=body.get("language", "en"),
+        components=body.get("components"),
+    )
+    if result["success"]:
+        return result
+    else:
+        raise HTTPException(status_code=400, detail=result.get("error", "Send failed"))
 
 
 # --- Protected: Contacts API (Mini CRM) ---

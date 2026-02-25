@@ -563,6 +563,64 @@
             </div>
         </div>
 
+        <!-- Quick Message Modal (from Calls/Contacts) -->
+        <div id="quick-msg-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-lg font-bold text-gray-900">Send Message</h3>
+                    <button onclick="closeQuickMessage()" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+                </div>
+                <div class="mb-3">
+                    <p class="text-sm text-gray-600">To: <span id="qm-name" class="font-medium"></span> <span id="qm-phone" class="font-mono text-xs text-gray-400"></span></p>
+                </div>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Message Type</label>
+                        <select id="qm-type" onchange="onQmTypeChange()" class="w-full border rounded px-3 py-1.5 text-sm">
+                            <option value="text">Text Message</option>
+                            <option value="template">Template Message</option>
+                            <option value="interactive">Interactive (Buttons/List)</option>
+                        </select>
+                    </div>
+                    <!-- Text message -->
+                    <div id="qm-text-section">
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Message</label>
+                        <textarea id="qm-message" rows="4" placeholder="Type your message..."
+                            class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"></textarea>
+                    </div>
+                    <!-- Template message -->
+                    <div id="qm-template-section" class="hidden space-y-2">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Template</label>
+                            <select id="qm-template" onchange="onQmTemplateSelected()" class="w-full border rounded px-3 py-1.5 text-sm">
+                                <option value="">Loading...</option>
+                            </select>
+                        </div>
+                        <div id="qm-template-preview" class="bg-gray-50 border rounded p-2 text-xs"></div>
+                        <div id="qm-template-vars" class="space-y-1"></div>
+                    </div>
+                    <!-- Interactive section -->
+                    <div id="qm-interactive-section" class="hidden space-y-2">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Body Text</label>
+                            <textarea id="qm-int-body" rows="2" placeholder="Message body..."
+                                class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"></textarea>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Buttons (one per line, max 3)</label>
+                            <textarea id="qm-int-buttons" rows="3" placeholder="View Courses&#10;Fee Structure&#10;Contact Us"
+                                class="w-full border rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div id="qm-result" class="text-sm mt-2 hidden"></div>
+                <div class="flex gap-2 justify-end mt-4">
+                    <button onclick="closeQuickMessage()" class="text-sm bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300">Cancel</button>
+                    <button onclick="sendQuickMessage()" id="qm-send-btn" class="text-sm bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Send</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Interactive Message Modal -->
         <div id="interactive-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-lg mx-4 max-h-[85vh] overflow-y-auto">
@@ -812,6 +870,135 @@
         } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to resolve: ' + e.message); }
     }
 
+    // --- Quick Message (from Calls/Contacts) ---
+
+    let _qmPhone = '';
+    let _qmName = '';
+
+    function showQuickMessage(phone, name) {
+        _qmPhone = phone;
+        _qmName = name || '';
+        document.getElementById('qm-name').textContent = name || 'Unknown';
+        document.getElementById('qm-phone').textContent = phone;
+        document.getElementById('qm-message').value = '';
+        document.getElementById('qm-type').value = 'text';
+        document.getElementById('qm-result').classList.add('hidden');
+        document.getElementById('qm-send-btn').disabled = false;
+        onQmTypeChange();
+        document.getElementById('quick-msg-modal').classList.remove('hidden');
+    }
+
+    function closeQuickMessage() {
+        document.getElementById('quick-msg-modal').classList.add('hidden');
+    }
+
+    function onQmTypeChange() {
+        const type = document.getElementById('qm-type').value;
+        document.getElementById('qm-text-section').classList.toggle('hidden', type !== 'text');
+        document.getElementById('qm-template-section').classList.toggle('hidden', type !== 'template');
+        document.getElementById('qm-interactive-section').classList.toggle('hidden', type !== 'interactive');
+        if (type === 'template') loadQmTemplates();
+    }
+
+    async function loadQmTemplates() {
+        if (!_templateCache.length) {
+            try {
+                const res = await authFetch('/api/templates');
+                const data = await res.json();
+                _templateCache = (data.templates || []).filter(t => t.status === 'APPROVED');
+            } catch (e) { /* ignore */ }
+        }
+        const select = document.getElementById('qm-template');
+        if (!_templateCache.length) {
+            select.innerHTML = '<option value="">No approved templates</option>';
+            return;
+        }
+        select.innerHTML = '<option value="">-- Select --</option>' + _templateCache.map(t => {
+            const cat = (t.category || '').toUpperCase();
+            const tag = cat === 'MARKETING' ? '[MKT]' : cat === 'UTILITY' ? '[UTL]' : `[${cat}]`;
+            return `<option value="${escapeHtml(t.name)}">${tag} ${escapeHtml(t.name)} (${t.language || 'en'})</option>`;
+        }).join('');
+    }
+
+    function onQmTemplateSelected() {
+        const name = document.getElementById('qm-template').value;
+        const previewEl = document.getElementById('qm-template-preview');
+        const varsEl = document.getElementById('qm-template-vars');
+        if (!name) { previewEl.innerHTML = ''; varsEl.innerHTML = ''; return; }
+        const tpl = _templateCache.find(t => t.name === name);
+        if (!tpl) return;
+        previewEl.innerHTML = renderTemplatePreview(tpl);
+        const vars = extractTemplateVariables(tpl);
+        if (vars.length > 0) {
+            varsEl.innerHTML = vars.map((v, i) => `
+                <div class="flex items-center gap-2">
+                    <span class="text-xs font-mono bg-gray-200 px-1 py-0.5 rounded">{{${v.index}}}</span>
+                    <input type="text" class="qm-var-input flex-1 border rounded px-2 py-1 text-xs" data-index="${i}"
+                        placeholder="${escapeHtml(v.example || 'Value')}" value="${escapeHtml(v.example || '')}">
+                </div>
+            `).join('');
+        } else {
+            varsEl.innerHTML = '<p class="text-xs text-gray-400">No variables</p>';
+        }
+    }
+
+    async function sendQuickMessage() {
+        const type = document.getElementById('qm-type').value;
+        const resultEl = document.getElementById('qm-result');
+        const sendBtn = document.getElementById('qm-send-btn');
+        resultEl.classList.add('hidden');
+        sendBtn.disabled = true;
+
+        try {
+            if (type === 'text') {
+                const message = document.getElementById('qm-message').value.trim();
+                if (!message) { alert('Message is required'); sendBtn.disabled = false; return; }
+                await authFetch('/api/messages/send-direct', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone: _qmPhone, name: _qmName, message }),
+                });
+            } else if (type === 'template') {
+                const tplName = document.getElementById('qm-template').value;
+                if (!tplName) { alert('Select a template'); sendBtn.disabled = false; return; }
+                const tpl = _templateCache.find(t => t.name === tplName);
+                const language = tpl?.language || 'en';
+                const varInputs = document.querySelectorAll('.qm-var-input');
+                const params = [];
+                varInputs.forEach(input => params.push(input.value || ''));
+                // Build components
+                const components = params.length ? [{ type: 'body', parameters: params.map(p => ({ type: 'text', text: p.replace('{{name}}', _qmName || 'there') })) }] : undefined;
+                await authFetch('/api/messages/send-template', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ to: _qmPhone, template_name: tplName, language, components }),
+                });
+            } else if (type === 'interactive') {
+                const body = document.getElementById('qm-int-body').value.trim();
+                if (!body) { alert('Body text is required'); sendBtn.disabled = false; return; }
+                const btnLines = document.getElementById('qm-int-buttons').value.trim().split('\n').filter(Boolean);
+                const buttons = btnLines.slice(0, 3).map((t, i) => ({ id: `btn_${i+1}`, title: t.trim().substring(0, 20) }));
+                if (!buttons.length) { alert('At least one button is required'); sendBtn.disabled = false; return; }
+                await authFetch('/api/whatsapp/send-interactive', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ to: _qmPhone, type: 'button', body, buttons }),
+                });
+            }
+            resultEl.textContent = 'Sent successfully!';
+            resultEl.className = 'text-sm mt-2 text-green-600';
+            resultEl.classList.remove('hidden');
+            sendBtn.disabled = false;
+            // Auto-close after short delay
+            setTimeout(() => closeQuickMessage(), 1500);
+        } catch (e) {
+            resultEl.textContent = 'Failed: ' + e.message;
+            resultEl.className = 'text-sm mt-2 text-red-600';
+            resultEl.classList.remove('hidden');
+            sendBtn.disabled = false;
+        }
+    }
+
     async function loadCalls() {
         try {
             const res = await authFetch('/calls?limit=100');
@@ -833,7 +1020,10 @@
                         <td class="px-4 py-2">${statusBadge(c.status)}</td>
                         <td class="px-4 py-2">${topicBadges(c.topics)}</td>
                         <td class="px-4 py-2 text-xs text-gray-500">${formatTime(c.connected_at || c.created_at)}</td>
-                        <td class="px-4 py-2">${isHandoff ? `<button onclick="event.stopPropagation(); resolveCall('${safeId}')" class="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded hover:bg-orange-200">Resolve</button>` : ''}</td>
+                        <td class="px-4 py-2 space-x-1">
+                            ${c.caller_phone ? `<button onclick="event.stopPropagation(); showQuickMessage('${escapeHtml(c.caller_phone)}', '${escapeHtml(c.caller_name || '')}')" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">Message</button>` : ''}
+                            ${isHandoff ? `<button onclick="event.stopPropagation(); resolveCall('${safeId}')" class="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded hover:bg-orange-200">Resolve</button>` : ''}
+                        </td>
                     </tr>
                     <tr id="transcript-call-${safeId}" class="transcript-row">
                         <td colspan="7" class="px-4 py-3 bg-gray-50">
