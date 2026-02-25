@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import aiosqlite
 from loguru import logger
 
-from db import DB_PATH
+from db import DB_PATH, _enable_foreign_keys, _validate_columns
 from utils import generate_id
 
 VALID_CAMPAIGN_STATUSES = ("draft", "running", "paused", "completed", "failed")
@@ -20,6 +20,7 @@ VALID_CAMPAIGN_STATUSES = ("draft", "running", "paused", "completed", "failed")
 async def init_campaign_tables():
     """Create campaigns and campaign_recipients tables."""
     async with aiosqlite.connect(DB_PATH) as db:
+        await _enable_foreign_keys(db)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS campaigns (
                 id                TEXT PRIMARY KEY,
@@ -52,7 +53,8 @@ async def init_campaign_tables():
                 read_at         TEXT,
                 error_message   TEXT DEFAULT '',
                 created_at      TEXT DEFAULT (datetime('now')),
-                FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+                FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
+                UNIQUE(campaign_id, phone)
             )
         """)
         await db.execute("""
@@ -62,6 +64,10 @@ async def init_campaign_tables():
         await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_recipients_wamid
             ON campaign_recipients(wa_message_id)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_campaigns_status
+            ON campaigns(status)
         """)
         await db.commit()
     logger.info("Campaign tables initialized")
@@ -126,10 +132,19 @@ async def list_campaigns(limit: int = 100, status: str = "") -> list[dict]:
         return [_parse_campaign(row) for row in rows]
 
 
+_CAMPAIGN_ALLOWED_COLUMNS = {
+    "name", "template_name", "language", "template_params", "status",
+    "recipient_count", "sent_count", "delivered_count", "read_count",
+    "failed_count", "rate_limit_per_min", "started_at", "completed_at",
+}
+
+
 async def update_campaign(campaign_id: str, **kwargs) -> dict | None:
-    """Update campaign fields."""
+    """Update campaign fields. Only whitelisted columns are accepted."""
     if not kwargs:
         return await get_campaign(campaign_id)
+
+    _validate_columns(kwargs, _CAMPAIGN_ALLOWED_COLUMNS)
 
     if "template_params" in kwargs and isinstance(kwargs["template_params"], list):
         kwargs["template_params"] = json.dumps(kwargs["template_params"], ensure_ascii=False)
@@ -137,6 +152,7 @@ async def update_campaign(campaign_id: str, **kwargs) -> dict | None:
     set_clause = ", ".join(f"{k} = ?" for k in kwargs)
     values = list(kwargs.values()) + [campaign_id]
     async with aiosqlite.connect(DB_PATH) as db:
+        await _enable_foreign_keys(db)
         await db.execute(f"UPDATE campaigns SET {set_clause} WHERE id = ?", values)
         await db.commit()
     return await get_campaign(campaign_id)
@@ -232,6 +248,11 @@ async def get_pending_recipients(campaign_id: str, limit: int = 100) -> list[dic
             return [dict(row) for row in rows]
 
 
+_RECIPIENT_ALLOWED_COLUMNS = {
+    "status", "wa_message_id", "error_message", "sent_at", "delivered_at", "read_at",
+}
+
+
 async def update_recipient_status(
     recipient_id: str,
     status: str,
@@ -252,9 +273,11 @@ async def update_recipient_status(
     elif status == "read":
         updates["read_at"] = now
 
+    _validate_columns(updates, _RECIPIENT_ALLOWED_COLUMNS)
     set_clause = ", ".join(f"{k} = ?" for k in updates)
     values = list(updates.values()) + [recipient_id]
     async with aiosqlite.connect(DB_PATH) as db:
+        await _enable_foreign_keys(db)
         await db.execute(
             f"UPDATE campaign_recipients SET {set_clause} WHERE id = ?", values
         )
@@ -286,15 +309,17 @@ async def update_recipient_by_wamid(wa_message_id: str, status: str) -> bool:
 
 
 async def refresh_campaign_stats(campaign_id: str) -> None:
-    """Recount campaign stats from recipient rows."""
+    """Recount campaign stats from recipient rows using single GROUP BY query."""
     async with aiosqlite.connect(DB_PATH) as db:
-        counts = {}
-        for status in ("pending", "sent", "delivered", "read", "failed"):
-            async with db.execute(
-                "SELECT COUNT(*) FROM campaign_recipients WHERE campaign_id = ? AND status = ?",
-                (campaign_id, status),
-            ) as cursor:
-                counts[status] = (await cursor.fetchone())[0]
+        await _enable_foreign_keys(db)
+        counts = {"pending": 0, "sent": 0, "delivered": 0, "read": 0, "failed": 0}
+        async with db.execute(
+            "SELECT status, COUNT(*) FROM campaign_recipients WHERE campaign_id = ? GROUP BY status",
+            (campaign_id,),
+        ) as cursor:
+            async for row in cursor:
+                if row[0] in counts:
+                    counts[row[0]] = row[1]
 
         await db.execute(
             """UPDATE campaigns SET
@@ -306,21 +331,17 @@ async def refresh_campaign_stats(campaign_id: str) -> None:
 
 
 async def get_recipient_stats(campaign_id: str) -> dict:
-    """Get count per status for a campaign."""
+    """Get count per status for a campaign using single GROUP BY query."""
     async with aiosqlite.connect(DB_PATH) as db:
-        stats = {}
-        for status in ("pending", "sent", "delivered", "read", "failed"):
-            async with db.execute(
-                "SELECT COUNT(*) FROM campaign_recipients WHERE campaign_id = ? AND status = ?",
-                (campaign_id, status),
-            ) as cursor:
-                stats[status] = (await cursor.fetchone())[0]
-
+        stats = {"pending": 0, "sent": 0, "delivered": 0, "read": 0, "failed": 0, "total": 0}
         async with db.execute(
-            "SELECT COUNT(*) FROM campaign_recipients WHERE campaign_id = ?",
+            "SELECT status, COUNT(*) FROM campaign_recipients WHERE campaign_id = ? GROUP BY status",
             (campaign_id,),
         ) as cursor:
-            stats["total"] = (await cursor.fetchone())[0]
+            async for row in cursor:
+                if row[0] in stats:
+                    stats[row[0]] = row[1]
+                stats["total"] += row[1]
         return stats
 
 
@@ -367,5 +388,5 @@ def _parse_campaign(row) -> dict:
         try:
             record["template_params"] = json.loads(record["template_params"])
         except (json.JSONDecodeError, TypeError):
-            pass
+            logger.warning(f"Campaign {record.get('id', '?')}: failed to parse template_params JSON")
     return record

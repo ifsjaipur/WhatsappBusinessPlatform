@@ -10,13 +10,14 @@ from datetime import datetime, timezone
 import aiosqlite
 from loguru import logger
 
-from db import DB_PATH
+from db import DB_PATH, _enable_foreign_keys, _validate_columns
 from utils import generate_id
 
 
 async def init_orders_table():
     """Create orders table. Called from init_db()."""
     async with aiosqlite.connect(DB_PATH) as db:
+        await _enable_foreign_keys(db)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS orders (
                 id                  TEXT PRIMARY KEY,
@@ -137,10 +138,20 @@ async def get_orders_by_contact(contact_id: str, limit: int = 20) -> list[dict]:
             return [_parse_order(row) for row in rows]
 
 
+_ORDER_ALLOWED_COLUMNS = {
+    "contact_id", "conversation_id", "phone", "name", "catalog_id",
+    "items", "total_amount", "currency", "status", "razorpay_order_id",
+    "razorpay_payment_id", "razorpay_status", "payment_link", "notes",
+    "updated_at",
+}
+
+
 async def update_order(order_id: str, **kwargs) -> dict | None:
-    """Update order fields."""
+    """Update order fields. Only whitelisted columns are accepted."""
     if not kwargs:
         return await get_order(order_id)
+
+    _validate_columns(kwargs, _ORDER_ALLOWED_COLUMNS)
 
     if "items" in kwargs and isinstance(kwargs["items"], list):
         kwargs["items"] = json.dumps(kwargs["items"], ensure_ascii=False)
@@ -150,6 +161,7 @@ async def update_order(order_id: str, **kwargs) -> dict | None:
     set_clause = ", ".join(f"{k} = ?" for k in kwargs)
     values = list(kwargs.values()) + [order_id]
     async with aiosqlite.connect(DB_PATH) as db:
+        await _enable_foreign_keys(db)
         await db.execute(f"UPDATE orders SET {set_clause} WHERE id = ?", values)
         await db.commit()
     return await get_order(order_id)
@@ -229,5 +241,5 @@ def _parse_order(row) -> dict:
         try:
             record["items"] = json.loads(record["items"])
         except (json.JSONDecodeError, TypeError):
-            pass
+            logger.warning(f"Order {record.get('id', '?')}: failed to parse items JSON")
     return record

@@ -99,6 +99,8 @@ DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 SESSION_EXPIRY_HOURS = 24
 
+IS_PRODUCTION = os.getenv("ENVIRONMENT", "").lower() in ("production", "prod")
+
 if not all([WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID]):
     missing = [v for v, val in [
         ("WHATSAPP_TOKEN", WHATSAPP_TOKEN),
@@ -110,7 +112,14 @@ if not WHATSAPP_WEBHOOK_VERIFICATION_TOKEN:
     logger.warning("WHATSAPP_WEBHOOK_VERIFICATION_TOKEN not set — webhook verification may fail")
 
 if not DASHBOARD_PASSWORD:
+    if IS_PRODUCTION:
+        raise ValueError("DASHBOARD_PASSWORD must be set in production")
     logger.warning("DASHBOARD_PASSWORD not set — dashboard auth is DISABLED (dev mode)")
+
+if not WEBHOOK_SECRET:
+    if IS_PRODUCTION:
+        raise ValueError("WEBHOOK_SECRET must be set in production")
+    logger.warning("WEBHOOK_SECRET not set — webhook validation is DISABLED (dev mode)")
 
 # Ensure directories exist
 STATIC_DIR = Path(__file__).parent / "static"
@@ -181,6 +190,37 @@ async def require_auth(
     raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+async def require_auth_csrf(
+    request: Request,
+    session_token: str = Cookie(default=""),
+    authorization: str = Header(default=""),
+    csrf_token: str = Cookie(default=""),
+):
+    """Auth + CSRF validation for mutating endpoints (POST/PATCH/DELETE).
+
+    CSRF check uses double-submit cookie: the X-CSRF-Token header must match
+    the csrf_token cookie. Bearer token auth skips CSRF (API access).
+    """
+    if not DASHBOARD_PASSWORD:
+        return  # Auth disabled in dev mode
+
+    # Bearer token — no CSRF needed for API clients
+    if authorization.startswith("Bearer "):
+        token = authorization[7:]
+        if token == DASHBOARD_PASSWORD:
+            return
+
+    # Session cookie auth
+    if not verify_session(session_token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # CSRF double-submit check for browser sessions
+    if request.method in ("POST", "PATCH", "PUT", "DELETE"):
+        header_csrf = request.headers.get("X-CSRF-Token", "")
+        if not csrf_token or not header_csrf or csrf_token != header_csrf:
+            raise HTTPException(status_code=403, detail="CSRF token mismatch")
+
+
 # --- Knowledge file helpers ---
 
 
@@ -193,6 +233,19 @@ def validate_knowledge_filename(filename: str) -> str:
     if not re.match(r'^[a-zA-Z0-9_\-]+\.md$', filename):
         raise HTTPException(status_code=400, detail="Filename can only contain letters, numbers, hyphens, and underscores")
     return filename
+
+
+BACKGROUND_TASK_TIMEOUT = 300  # 5 minutes max for background tasks
+
+
+async def _run_with_timeout(coro, timeout=BACKGROUND_TASK_TIMEOUT, task_name="background"):
+    """Run an async coroutine with a timeout to prevent zombie tasks."""
+    try:
+        await asyncio.wait_for(coro, timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.error(f"{task_name} timed out after {timeout}s")
+    except Exception as e:
+        logger.error(f"{task_name} error: {e}")
 
 
 def signal_handler():
@@ -252,11 +305,20 @@ async def auth_login(request: Request):
         raise HTTPException(status_code=401, detail="Invalid password")
 
     token = create_session()
-    response = JSONResponse({"status": "ok"})
+    csrf_token = secrets.token_urlsafe(32)
+    response = JSONResponse({"status": "ok", "csrf_token": csrf_token})
     response.set_cookie(
         key="session_token",
         value=token,
         httponly=True,
+        secure=True,
+        samesite="strict",
+        max_age=SESSION_EXPIRY_HOURS * 3600,
+    )
+    response.set_cookie(
+        key="csrf_token",
+        value=csrf_token,
+        httponly=False,  # JS needs to read this
         secure=True,
         samesite="strict",
         max_age=SESSION_EXPIRY_HOURS * 3600,
@@ -432,14 +494,15 @@ async def handle_text_webhook(request: Request, background_tasks: BackgroundTask
     # Reload knowledge (allows live updates)
     current_knowledge = load_knowledge()
 
-    # Handle message in background
+    # Handle message in background with timeout
     background_tasks.add_task(
-        handle_text_message,
-        sender_phone,
-        sender_name,
-        message_text,
-        wa_message_id,
-        current_knowledge,
+        _run_with_timeout,
+        handle_text_message(
+            sender_phone, sender_name, message_text,
+            wa_message_id, current_knowledge,
+        ),
+        BACKGROUND_TASK_TIMEOUT,
+        f"text_message({sender_phone})",
     )
 
     return {"status": "success"}
@@ -502,15 +565,14 @@ async def handle_unified_webhook(request: Request, background_tasks: BackgroundT
     # Reload knowledge for AI chatbot
     current_knowledge = load_knowledge()
 
-    # Route via message router (runs in background)
+    # Route via message router (runs in background with timeout)
     async def _route():
-        try:
-            result = await route_webhook(body, current_knowledge)
-            logger.info(f"Router result: {result}")
-        except Exception as e:
-            logger.error(f"Router error: {e}")
+        result = await route_webhook(body, current_knowledge)
+        logger.info(f"Router result: {result}")
 
-    background_tasks.add_task(_route)
+    background_tasks.add_task(
+        _run_with_timeout, _route(), BACKGROUND_TASK_TIMEOUT, "unified_webhook_route",
+    )
     return {"status": "success"}
 
 
@@ -531,7 +593,7 @@ async def get_inbox_messages(conversation_id: str, limit: int = 50, offset: int 
     return {"messages": messages, "count": len(messages)}
 
 
-@app.post("/api/messages/send", dependencies=[Depends(require_auth)])
+@app.post("/api/messages/send", dependencies=[Depends(require_auth_csrf)])
 async def send_manual_message(request: Request):
     """Send a manual reply from the inbox.
 
@@ -596,7 +658,7 @@ async def api_export_contacts(stage: str = ""):
     return {"contacts": contacts, "count": len(contacts)}
 
 
-@app.post("/api/contacts/import", dependencies=[Depends(require_auth)])
+@app.post("/api/contacts/import", dependencies=[Depends(require_auth_csrf)])
 async def api_import_contacts(request: Request):
     """Bulk import contacts.
 
@@ -625,7 +687,7 @@ async def api_get_contact(contact_id: str):
     return contact
 
 
-@app.patch("/api/contacts/{contact_id}", dependencies=[Depends(require_auth)])
+@app.patch("/api/contacts/{contact_id}", dependencies=[Depends(require_auth_csrf)])
 async def api_update_contact(contact_id: str, request: Request):
     """Update contact fields (name, email, stage, tags, notes).
 
@@ -654,7 +716,7 @@ async def api_update_contact(contact_id: str, request: Request):
     return contact
 
 
-@app.patch("/api/contacts/{contact_id}/ai", dependencies=[Depends(require_auth)])
+@app.patch("/api/contacts/{contact_id}/ai", dependencies=[Depends(require_auth_csrf)])
 async def api_toggle_ai(contact_id: str, request: Request):
     """Toggle AI auto-reply for a contact.
 
@@ -699,7 +761,7 @@ async def api_list_campaigns(limit: int = 100, status: str = ""):
     return {"campaigns": campaigns, "count": len(campaigns)}
 
 
-@app.post("/api/campaigns", dependencies=[Depends(require_auth)])
+@app.post("/api/campaigns", dependencies=[Depends(require_auth_csrf)])
 async def api_create_campaign(request: Request):
     """Create a new campaign.
 
@@ -735,7 +797,7 @@ async def api_get_campaign(campaign_id: str):
     return campaign
 
 
-@app.patch("/api/campaigns/{campaign_id}", dependencies=[Depends(require_auth)])
+@app.patch("/api/campaigns/{campaign_id}", dependencies=[Depends(require_auth_csrf)])
 async def api_update_campaign(campaign_id: str, request: Request):
     """Update campaign fields (name, rate_limit_per_min, template_params)."""
     try:
@@ -754,7 +816,7 @@ async def api_update_campaign(campaign_id: str, request: Request):
     return campaign
 
 
-@app.delete("/api/campaigns/{campaign_id}", dependencies=[Depends(require_auth)])
+@app.delete("/api/campaigns/{campaign_id}", dependencies=[Depends(require_auth_csrf)])
 async def api_delete_campaign(campaign_id: str):
     """Delete a campaign (not allowed while running)."""
     try:
@@ -766,7 +828,7 @@ async def api_delete_campaign(campaign_id: str):
     return {"status": "deleted", "campaign_id": campaign_id}
 
 
-@app.post("/api/campaigns/{campaign_id}/recipients", dependencies=[Depends(require_auth)])
+@app.post("/api/campaigns/{campaign_id}/recipients", dependencies=[Depends(require_auth_csrf)])
 async def api_add_recipients(campaign_id: str, request: Request):
     """Add recipients to a campaign.
 
@@ -798,7 +860,7 @@ async def api_list_recipients(campaign_id: str, limit: int = 100, offset: int = 
     return {"recipients": recipients, "count": len(recipients)}
 
 
-@app.post("/api/campaigns/{campaign_id}/start", dependencies=[Depends(require_auth)])
+@app.post("/api/campaigns/{campaign_id}/start", dependencies=[Depends(require_auth_csrf)])
 async def api_start_campaign(campaign_id: str, background_tasks: BackgroundTasks):
     """Start sending a campaign."""
     campaign = await get_campaign(campaign_id)
@@ -817,7 +879,7 @@ async def api_start_campaign(campaign_id: str, background_tasks: BackgroundTasks
     return {"status": "starting", "campaign_id": campaign_id}
 
 
-@app.post("/api/campaigns/{campaign_id}/pause", dependencies=[Depends(require_auth)])
+@app.post("/api/campaigns/{campaign_id}/pause", dependencies=[Depends(require_auth_csrf)])
 async def api_pause_campaign(campaign_id: str):
     """Pause a running campaign."""
     if not is_campaign_running(campaign_id):
@@ -933,7 +995,7 @@ async def get_conversation_detail(conversation_id: str):
 # --- Protected: Resolve Handoffs ---
 
 
-@app.patch("/api/calls/{call_id}/resolve", dependencies=[Depends(require_auth)])
+@app.patch("/api/calls/{call_id}/resolve", dependencies=[Depends(require_auth_csrf)])
 async def resolve_call_handoff(call_id: str):
     """Mark a call handoff as resolved."""
     call = await get_call(call_id)
@@ -943,7 +1005,7 @@ async def resolve_call_handoff(call_id: str):
     return {"status": "resolved", "call_id": call_id}
 
 
-@app.patch("/api/conversations/{conversation_id}/resolve", dependencies=[Depends(require_auth)])
+@app.patch("/api/conversations/{conversation_id}/resolve", dependencies=[Depends(require_auth_csrf)])
 async def resolve_conversation_handoff(conversation_id: str):
     """Mark a chat handoff as resolved."""
     conv = await get_conversation(conversation_id)
@@ -1005,7 +1067,7 @@ async def get_knowledge_file(filename: str):
     return {"name": filename, "content": content}
 
 
-@app.put("/api/knowledge/{filename}", dependencies=[Depends(require_auth)])
+@app.put("/api/knowledge/{filename}", dependencies=[Depends(require_auth_csrf)])
 async def update_knowledge_file(filename: str, request: Request):
     """Update or create a knowledge file."""
     filename = validate_knowledge_filename(filename)
@@ -1021,7 +1083,7 @@ async def update_knowledge_file(filename: str, request: Request):
     return {"status": "saved", "name": filename}
 
 
-@app.post("/api/knowledge", dependencies=[Depends(require_auth)])
+@app.post("/api/knowledge", dependencies=[Depends(require_auth_csrf)])
 async def create_knowledge_file(request: Request):
     """Create a new knowledge file."""
     try:
@@ -1041,7 +1103,7 @@ async def create_knowledge_file(request: Request):
     return {"status": "created", "name": filename}
 
 
-@app.delete("/api/knowledge/{filename}", dependencies=[Depends(require_auth)])
+@app.delete("/api/knowledge/{filename}", dependencies=[Depends(require_auth_csrf)])
 async def delete_knowledge_file(filename: str):
     """Delete a knowledge file."""
     filename = validate_knowledge_filename(filename)
@@ -1053,7 +1115,7 @@ async def delete_knowledge_file(filename: str):
     return {"status": "deleted", "name": filename}
 
 
-@app.post("/api/knowledge/{filename}/rename", dependencies=[Depends(require_auth)])
+@app.post("/api/knowledge/{filename}/rename", dependencies=[Depends(require_auth_csrf)])
 async def rename_knowledge_file(filename: str, request: Request):
     """Rename a knowledge file."""
     filename = validate_knowledge_filename(filename)

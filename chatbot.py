@@ -30,7 +30,7 @@ IMPORTANT RULES:
 - You are responding to WhatsApp text messages. Keep replies clear and helpful (3-5 sentences).
 - Respond in the SAME LANGUAGE the user writes in (Hindi or English).
 - Only answer from the knowledge provided below. Never make up information.
-- If you don't know something, say: "I'd be happy to connect you with our admissions team for more details. You can also reach us at +91 78913 93505."
+- If you don't know something, say: "I'd be happy to connect you with our admissions team for more details. You can also reach us at {support_phone}."
 - You may use bullet points or numbered lists for clarity.
 - Be warm, professional, and helpful.
 - If the user wants to speak to a human, say: "I'll let our team know. Someone will call you back shortly."
@@ -39,9 +39,11 @@ YOUR KNOWLEDGE:
 {knowledge}
 """
 
+SUPPORT_PHONE = os.getenv("IFS_SUPPORT_PHONE", "+91 78913 93505")
+
 FALLBACK_MESSAGE = (
     "I'm sorry, I'm having trouble processing your message right now. "
-    "Please try again or call us directly at +91 78913 93505."
+    f"Please try again or call us directly at {SUPPORT_PHONE}."
 )
 
 
@@ -139,7 +141,8 @@ async def _call_gpt4o(knowledge_context: str, messages: list[dict]) -> str:
         return FALLBACK_MESSAGE
 
     system_prompt = CHAT_SYSTEM_PROMPT.format(
-        knowledge=knowledge_context or "No knowledge documents loaded yet."
+        knowledge=knowledge_context or "No knowledge documents loaded yet.",
+        support_phone=SUPPORT_PHONE,
     )
 
     openai_messages = [{"role": "system", "content": system_prompt}]

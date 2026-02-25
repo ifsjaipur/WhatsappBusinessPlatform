@@ -6,9 +6,12 @@ campaign stats in real time.
 """
 
 import asyncio
+import os
 import time
 
 from loguru import logger
+
+DEFAULT_RATE_LIMIT = int(os.getenv("CAMPAIGN_RATE_LIMIT", "60"))
 
 from campaign_db import (
     get_campaign,
@@ -48,7 +51,7 @@ async def run_campaign(campaign_id: str) -> None:
         logger.warning(f"Campaign {campaign_id} status is {campaign['status']}, cannot start")
         return
 
-    rate_limit = campaign.get("rate_limit_per_min", 60)
+    rate_limit = campaign.get("rate_limit_per_min") or DEFAULT_RATE_LIMIT
     template_name = campaign["template_name"]
     language = campaign.get("language", "en")
     template_params = campaign.get("template_params") or []

@@ -15,6 +15,7 @@ from loguru import logger
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
 WHATSAPP_API_VERSION = os.getenv("WHATSAPP_API_VERSION", "v21.0")
+SUPPORT_PHONE = os.getenv("IFS_SUPPORT_PHONE", "+91 78913 93505")
 
 WHATSAPP_API_URL = (
     f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{WHATSAPP_PHONE_NUMBER_ID}/messages"
@@ -177,148 +178,6 @@ async def send_whatsapp_template(
         return False
 
 
-async def send_interactive_buttons(
-    to_phone: str,
-    body_text: str,
-    buttons: list[dict],
-    header_text: str = "",
-    footer_text: str = "",
-) -> bool:
-    """Send an interactive button message via WhatsApp Cloud API.
-
-    Args:
-        to_phone: Recipient phone number (E.164 without +)
-        body_text: Main message body
-        buttons: List of buttons, each: {"id": "btn_1", "title": "Click Me"}
-                 Max 3 buttons, title max 20 chars
-        header_text: Optional header text
-        footer_text: Optional footer text
-
-    Returns:
-        True if sent successfully, False otherwise.
-    """
-    if not all([WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID]):
-        return False
-
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json",
-    }
-
-    action_buttons = [
-        {"type": "reply", "reply": {"id": b["id"], "title": b["title"][:20]}}
-        for b in buttons[:3]
-    ]
-
-    interactive = {
-        "type": "button",
-        "body": {"text": body_text[:1024]},
-        "action": {"buttons": action_buttons},
-    }
-    if header_text:
-        interactive["header"] = {"type": "text", "text": header_text[:60]}
-    if footer_text:
-        interactive["footer"] = {"text": footer_text[:60]}
-
-    payload = {
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
-        "to": to_phone,
-        "type": "interactive",
-        "interactive": interactive,
-    }
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                WHATSAPP_API_URL,
-                json=payload,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                if resp.status == 200:
-                    logger.info(f"Interactive buttons sent to {to_phone}")
-                    return True
-                else:
-                    body = await resp.text()
-                    logger.warning(f"Interactive send failed {resp.status}: {body}")
-                    return False
-    except Exception as e:
-        logger.error(f"Failed to send interactive to {to_phone}: {e}")
-        return False
-
-
-async def send_interactive_list(
-    to_phone: str,
-    body_text: str,
-    button_text: str,
-    sections: list[dict],
-    header_text: str = "",
-    footer_text: str = "",
-) -> bool:
-    """Send an interactive list message via WhatsApp Cloud API.
-
-    Args:
-        to_phone: Recipient phone number
-        body_text: Main message body
-        button_text: Text on the list button (max 20 chars)
-        sections: List of sections, each:
-                  {"title": "Section", "rows": [{"id": "1", "title": "Item", "description": "..."}]}
-        header_text: Optional header
-        footer_text: Optional footer
-
-    Returns:
-        True if sent successfully.
-    """
-    if not all([WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID]):
-        return False
-
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json",
-    }
-
-    interactive = {
-        "type": "list",
-        "body": {"text": body_text[:1024]},
-        "action": {
-            "button": button_text[:20],
-            "sections": sections[:10],
-        },
-    }
-    if header_text:
-        interactive["header"] = {"type": "text", "text": header_text[:60]}
-    if footer_text:
-        interactive["footer"] = {"text": footer_text[:60]}
-
-    payload = {
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
-        "to": to_phone,
-        "type": "interactive",
-        "interactive": interactive,
-    }
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                WHATSAPP_API_URL,
-                json=payload,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                if resp.status == 200:
-                    logger.info(f"Interactive list sent to {to_phone}")
-                    return True
-                else:
-                    body = await resp.text()
-                    logger.warning(f"List send failed {resp.status}: {body}")
-                    return False
-    except Exception as e:
-        logger.error(f"Failed to send list to {to_phone}: {e}")
-        return False
-
-
 async def get_whatsapp_templates() -> list[dict]:
     """Fetch approved message templates from Meta Graph API.
 
@@ -370,7 +229,7 @@ async def send_followup_message(
             f"We noticed you would like to speak with our team directly. "
             f"A team member will reach out to you shortly.\n\n"
             f"In the meantime, feel free to reach us at:\n"
-            f"Phone: +91 78913 93505\n"
+            f"Phone: {SUPPORT_PHONE}\n"
             f"Mon-Sat: 10 AM - 6 PM\n\n"
             f"Thank you for your interest in IFS!"
         )
@@ -378,7 +237,7 @@ async def send_followup_message(
         message = (
             f"Hi {name}! Thank you for calling Institute of Financial Studies.\n\n"
             f"If you have any more questions, feel free to call us again or reach out at:\n"
-            f"Phone: +91 78913 93505\n"
+            f"Phone: {SUPPORT_PHONE}\n"
             f"Mon-Sat: 10 AM - 6 PM\n\n"
             f"We look forward to hearing from you!"
         )

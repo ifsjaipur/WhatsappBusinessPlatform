@@ -11,8 +11,11 @@ from datetime import datetime, timedelta, timezone
 import aiosqlite
 from loguru import logger
 
-from db import DB_PATH
+from db import DB_PATH, _enable_foreign_keys, _validate_columns
 from utils import generate_id
+
+# Dedup window: ignore duplicate wa_message_id only within this window
+DEDUP_WINDOW_HOURS = 48
 
 SESSION_TIMEOUT_HOURS = 24
 
@@ -20,11 +23,13 @@ SESSION_TIMEOUT_HOURS = 24
 async def init_chat_tables():
     """Create conversations and messages tables. Called from init_db()."""
     async with aiosqlite.connect(DB_PATH) as db:
+        await _enable_foreign_keys(db)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id              TEXT PRIMARY KEY,
                 phone           TEXT NOT NULL,
                 name            TEXT DEFAULT '',
+                contact_id      TEXT DEFAULT '',
                 started_at      TEXT DEFAULT (datetime('now')),
                 last_message_at TEXT DEFAULT (datetime('now')),
                 status          TEXT DEFAULT 'active',
@@ -42,9 +47,16 @@ async def init_chat_tables():
                 role            TEXT NOT NULL,
                 content         TEXT NOT NULL,
                 wa_message_id   TEXT DEFAULT '',
+                direction       TEXT DEFAULT 'inbound',
+                source          TEXT DEFAULT 'ai',
+                status          TEXT DEFAULT '',
                 created_at      TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (conversation_id) REFERENCES conversations(id)
             )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_messages_conversation
+            ON messages(conversation_id)
         """)
         await db.commit()
     logger.info("Chat tables initialized")
@@ -126,13 +138,14 @@ async def add_message(
 
 
 async def check_duplicate_message(wa_message_id: str) -> bool:
-    """Check if a WhatsApp message ID was already processed (deduplication)."""
+    """Check if a WhatsApp message ID was already processed within the dedup window."""
     if not wa_message_id:
         return False
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=DEDUP_WINDOW_HOURS)).isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT 1 FROM messages WHERE wa_message_id = ? LIMIT 1",
-            (wa_message_id,),
+            "SELECT 1 FROM messages WHERE wa_message_id = ? AND created_at > ? LIMIT 1",
+            (wa_message_id, cutoff),
         ) as cursor:
             return await cursor.fetchone() is not None
 
@@ -150,13 +163,21 @@ async def get_recent_messages(conversation_id: str, limit: int = 10) -> list[dic
             return [dict(row) for row in reversed(rows)]
 
 
+_CONVERSATION_ALLOWED_COLUMNS = {
+    "phone", "name", "contact_id", "last_message_at", "status",
+    "handoff_requested", "handoff_reason", "topics", "message_count",
+}
+
+
 async def update_conversation(conversation_id: str, **kwargs):
-    """Update conversation fields."""
+    """Update conversation fields. Only whitelisted columns are accepted."""
     if not kwargs:
         return
+    _validate_columns(kwargs, _CONVERSATION_ALLOWED_COLUMNS)
     set_clause = ", ".join(f"{k} = ?" for k in kwargs)
     values = list(kwargs.values()) + [conversation_id]
     async with aiosqlite.connect(DB_PATH) as db:
+        await _enable_foreign_keys(db)
         await db.execute(f"UPDATE conversations SET {set_clause} WHERE id = ?", values)
         await db.commit()
 
@@ -176,7 +197,7 @@ async def get_conversation(conversation_id: str) -> dict | None:
                     try:
                         record[field] = json.loads(record[field])
                     except (json.JSONDecodeError, TypeError):
-                        pass
+                        logger.warning(f"Failed to parse JSON field '{field}' in conversation {record.get('id', '?')}")
 
         # Fetch all messages
         async with db.execute(

@@ -1,0 +1,100 @@
+{
+  "name": "WhatsApp → IFS Platform (Unified)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wa-proxy",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -400,
+        0
+      ],
+      "id": "a75aa56f-e9af-4c78-9973-80533c4319de",
+      "name": "Webhook-post Request",
+      "webhookId": "6101fd3e-f320-4ce6-8f33-e9bc46749fe6"
+    },
+    {
+      "parameters": {
+        "respondWith": "noData",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -100,
+        0
+      ],
+      "id": "8919158c-ffec-4424-8464-4324e35dda5a",
+      "name": "Respond 200"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://wb.ifsjaipur.cloud/webhook/whatsapp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "YOUR_WEBHOOK_SECRET_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Webhook-post Request').item.json.body) }}",
+        "options": {
+          "timeout": 30000,
+          "ignore_ssl_issues": false
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        200,
+        0
+      ],
+      "id": "fwd-to-ifs-platform",
+      "name": "Forward to IFS Platform"
+    }
+  ],
+  "connections": {
+    "Webhook-post Request": {
+      "main": [
+        [
+          {
+            "node": "Respond 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond 200": {
+      "main": [
+        [
+          {
+            "node": "Forward to IFS Platform",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

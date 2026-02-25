@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import aiosqlite
 from loguru import logger
 
-from db import DB_PATH
+from db import DB_PATH, _enable_foreign_keys, _validate_columns
 from utils import generate_id
 
 VALID_STAGES = ("new", "contacted", "interested", "enrolled", "lost")
@@ -46,48 +46,33 @@ def _parse_contact(row: dict) -> dict:
         try:
             record["tags"] = json.loads(record["tags"])
         except (json.JSONDecodeError, TypeError):
-            pass
+            logger.warning(f"Contact {record.get('id', '?')}: failed to parse tags JSON")
     return record
 
 
 async def get_or_create_contact(phone: str, name: str = "") -> dict:
-    """Get existing contact by phone or create a new one."""
+    """Get existing contact by phone or create a new one (atomic upsert)."""
     now = datetime.now(timezone.utc).isoformat()
+    contact_id = generate_id()
 
     async with aiosqlite.connect(DB_PATH) as db:
+        await _enable_foreign_keys(db)
         db.row_factory = aiosqlite.Row
 
-        # Try to find existing
-        async with db.execute(
-            "SELECT * FROM contacts WHERE phone = ?", (phone,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row:
-                contact = _parse_contact(row)
-                # Update last_seen and name if provided
-                updates = {"last_seen": now}
-                if name and not contact.get("name"):
-                    updates["name"] = name
-                set_clause = ", ".join(f"{k} = ?" for k in updates)
-                values = list(updates.values()) + [phone]
-                await db.execute(
-                    f"UPDATE contacts SET {set_clause} WHERE phone = ?", values
-                )
-                await db.commit()
-                contact.update(updates)
-                return contact
-
-        # Create new contact
-        contact_id = generate_id()
+        # Atomic upsert: insert or update last_seen (and name if empty)
         await db.execute(
-            "INSERT INTO contacts (id, phone, name, first_seen, last_seen) VALUES (?, ?, ?, ?, ?)",
+            """INSERT INTO contacts (id, phone, name, first_seen, last_seen)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(phone) DO UPDATE SET
+                 last_seen = excluded.last_seen,
+                 name = CASE WHEN contacts.name = '' OR contacts.name IS NULL
+                             THEN excluded.name ELSE contacts.name END""",
             (contact_id, phone, name, now, now),
         )
         await db.commit()
-        logger.info(f"New contact created: {phone} ({name})")
 
         async with db.execute(
-            "SELECT * FROM contacts WHERE id = ?", (contact_id,)
+            "SELECT * FROM contacts WHERE phone = ?", (phone,)
         ) as cursor:
             row = await cursor.fetchone()
             return _parse_contact(row)
@@ -119,10 +104,18 @@ async def get_contact_by_phone(phone: str) -> dict | None:
             return _parse_contact(row)
 
 
+_CONTACT_ALLOWED_COLUMNS = {
+    "name", "email", "source", "stage", "tags", "notes", "ai_enabled",
+    "last_seen",
+}
+
+
 async def update_contact(contact_id: str, **kwargs) -> dict | None:
-    """Update contact fields. Returns updated contact."""
+    """Update contact fields. Only whitelisted columns are accepted."""
     if not kwargs:
         return await get_contact(contact_id)
+
+    _validate_columns(kwargs, _CONTACT_ALLOWED_COLUMNS)
 
     # Validate stage if provided
     if "stage" in kwargs and kwargs["stage"] not in VALID_STAGES:
@@ -135,6 +128,7 @@ async def update_contact(contact_id: str, **kwargs) -> dict | None:
     set_clause = ", ".join(f"{k} = ?" for k in kwargs)
     values = list(kwargs.values()) + [contact_id]
     async with aiosqlite.connect(DB_PATH) as db:
+        await _enable_foreign_keys(db)
         await db.execute(f"UPDATE contacts SET {set_clause} WHERE id = ?", values)
         await db.commit()
     return await get_contact(contact_id)
@@ -184,74 +178,77 @@ async def list_contacts(limit: int = 100, stage: str = "") -> list[dict]:
 
 
 async def import_contacts(records: list[dict]) -> dict:
-    """Bulk import contacts. Upserts by phone number.
+    """Bulk import contacts. Upserts by phone number using atomic INSERT ON CONFLICT.
 
     Args:
-        records: List of dicts with keys: phone (required), name, email, tags
+        records: List of dicts with keys: phone (required), name, email, tags, stage
 
     Returns:
         Dict with created_count and updated_count.
     """
     created = 0
     updated = 0
+    skipped = 0
     now = datetime.now(timezone.utc).isoformat()
 
     async with aiosqlite.connect(DB_PATH) as db:
-        for record in records:
-            phone = record.get("phone", "").strip()
-            if not phone:
-                continue
+        await _enable_foreign_keys(db)
+        try:
+            for record in records:
+                phone = record.get("phone", "").strip()
+                if not phone:
+                    skipped += 1
+                    continue
 
-            name = record.get("name", "").strip()
-            email = record.get("email", "").strip()
-            tags = record.get("tags", "")
-            if isinstance(tags, list):
-                tags = json.dumps(tags, ensure_ascii=False)
-            elif isinstance(tags, str) and tags and not tags.startswith("["):
-                # Comma-separated tags string → JSON array
-                tags = json.dumps([t.strip() for t in tags.split(",") if t.strip()], ensure_ascii=False)
-            elif not tags:
-                tags = "[]"
+                name = record.get("name", "").strip()
+                email = record.get("email", "").strip()
+                stage = record.get("stage", "").strip()
+                tags = record.get("tags", "")
 
-            # Check if contact exists
-            async with db.execute(
-                "SELECT id FROM contacts WHERE phone = ?", (phone,)
-            ) as cursor:
-                existing = await cursor.fetchone()
+                # Validate stage if provided
+                if stage and stage not in VALID_STAGES:
+                    logger.warning(f"Import: invalid stage '{stage}' for {phone}, defaulting to 'new'")
+                    stage = "new"
 
-            if existing:
-                # Update existing contact
-                updates = []
-                values = []
-                if name:
-                    updates.append("name = ?")
-                    values.append(name)
-                if email:
-                    updates.append("email = ?")
-                    values.append(email)
-                if tags != "[]":
-                    updates.append("tags = ?")
-                    values.append(tags)
-                if updates:
-                    values.append(phone)
-                    await db.execute(
-                        f"UPDATE contacts SET {', '.join(updates)} WHERE phone = ?",
-                        values,
-                    )
-                    updated += 1
-            else:
-                # Create new contact
+                if isinstance(tags, list):
+                    tags = json.dumps(tags, ensure_ascii=False)
+                elif isinstance(tags, str) and tags and not tags.startswith("["):
+                    tags = json.dumps([t.strip() for t in tags.split(",") if t.strip()], ensure_ascii=False)
+                elif not tags:
+                    tags = "[]"
+
+                # Atomic upsert using INSERT ON CONFLICT
                 contact_id = generate_id()
                 await db.execute(
-                    "INSERT INTO contacts (id, phone, name, email, tags, source, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, 'import', ?, ?)",
-                    (contact_id, phone, name, email, tags, now, now),
+                    """INSERT INTO contacts (id, phone, name, email, tags, source, stage, first_seen, last_seen)
+                       VALUES (?, ?, ?, ?, ?, 'import', ?, ?, ?)
+                       ON CONFLICT(phone) DO UPDATE SET
+                         name = CASE WHEN excluded.name != '' THEN excluded.name ELSE contacts.name END,
+                         email = CASE WHEN excluded.email != '' THEN excluded.email ELSE contacts.email END,
+                         tags = CASE WHEN excluded.tags != '[]' THEN excluded.tags ELSE contacts.tags END,
+                         stage = CASE WHEN excluded.stage != '' AND excluded.stage != 'new' THEN excluded.stage ELSE contacts.stage END,
+                         last_seen = excluded.last_seen""",
+                    (contact_id, phone, name, email, tags, stage or "new", now, now),
                 )
-                created += 1
 
-        await db.commit()
+                # Check if this was an insert or update
+                if db.total_changes > 0:
+                    async with db.execute(
+                        "SELECT id FROM contacts WHERE phone = ?", (phone,)
+                    ) as cursor:
+                        row = await cursor.fetchone()
+                        if row and row[0] == contact_id:
+                            created += 1
+                        else:
+                            updated += 1
 
-    logger.info(f"Contact import: {created} created, {updated} updated")
-    return {"created": created, "updated": updated, "total": created + updated}
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+    logger.info(f"Contact import: {created} created, {updated} updated, {skipped} skipped")
+    return {"created": created, "updated": updated, "skipped": skipped, "total": created + updated}
 
 
 async def export_contacts(stage: str = "") -> list[dict]:

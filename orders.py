@@ -33,6 +33,7 @@ RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
 RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
 RAZORPAY_API_URL = "https://api.razorpay.com/v1"
+SUPPORT_PHONE = os.getenv("IFS_SUPPORT_PHONE", "{SUPPORT_PHONE}")
 
 
 async def process_incoming_order(
@@ -63,7 +64,7 @@ async def process_incoming_order(
     for item in product_items:
         retailer_id = item.get("product_retailer_id", "")
         quantity = int(item.get("quantity", 1))
-        # item_price is in paise (1/100 of currency unit) from WhatsApp
+        # item_price from WhatsApp is in the currency's major unit (rupees, not paise)
         item_price = float(item.get("item_price", 0))
         currency = item.get("currency", "INR")
 
@@ -75,8 +76,7 @@ async def process_incoming_order(
         })
         total_amount += item_price * quantity
 
-    # Convert from paise to rupees for display (WhatsApp sends in paise)
-    total_rupees = total_amount / 100 if total_amount > 1000 else total_amount
+    total_rupees = total_amount
 
     # Create order in database
     order = await create_order(
@@ -111,7 +111,7 @@ async def process_incoming_order(
                 payment_msg = (
                     f"Thank you for your order! Your total is ₹{total_rupees:,.0f}.\n\n"
                     f"Complete your payment here:\n{result['payment_link']}\n\n"
-                    f"If you face any issues, call us at +91 78913 93505."
+                    f"If you face any issues, call us at {SUPPORT_PHONE}."
                 )
                 await send_whatsapp_text(phone, payment_msg)
             else:
@@ -120,7 +120,7 @@ async def process_incoming_order(
                     phone,
                     f"Thank you for your order (₹{total_rupees:,.0f})! "
                     f"Our team will share the payment link shortly. "
-                    f"Call us at +91 78913 93505 for assistance."
+                    f"Call us at {SUPPORT_PHONE} for assistance."
                 )
         except Exception as e:
             logger.error(f"Order {order_id}: Razorpay error: {e}")
@@ -135,7 +135,7 @@ async def process_incoming_order(
             phone,
             f"Thank you for your order (₹{total_rupees:,.0f})! "
             f"Our team will contact you with payment details. "
-            f"You can also reach us at +91 78913 93505."
+            f"You can also reach us at {SUPPORT_PHONE}."
         )
 
     return result
@@ -151,11 +151,10 @@ async def handle_razorpay_webhook(payload: dict, signature: str) -> dict:
     Returns:
         Dict with status and order details
     """
-    # Verify signature if secret is configured
-    if RAZORPAY_WEBHOOK_SECRET:
-        if not _verify_razorpay_signature(payload, signature):
-            logger.warning("Razorpay webhook signature verification failed")
-            return {"status": "error", "reason": "invalid signature"}
+    # Always verify signature — reject if secret not configured
+    if not _verify_razorpay_signature(payload, signature):
+        logger.warning("Razorpay webhook signature verification failed")
+        return {"status": "error", "reason": "invalid signature"}
 
     event = payload.get("event", "")
     payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
@@ -193,8 +192,8 @@ async def handle_razorpay_webhook(payload: dict, signature: str) -> dict:
             except Exception as e:
                 logger.error(f"Failed to update contact stage: {e}")
 
-        # Send confirmation to user
-        amount_rupees = amount / 100 if amount > 1000 else amount
+        # Send confirmation to user (Razorpay sends amount in paise)
+        amount_rupees = amount / 100
         await send_whatsapp_text(
             order["phone"],
             f"Payment received! ₹{amount_rupees:,.0f} confirmed.\n\n"
@@ -213,7 +212,7 @@ async def handle_razorpay_webhook(payload: dict, signature: str) -> dict:
         # Notify user
         await send_whatsapp_text(
             order["phone"],
-            f"Your payment could not be processed. Please try again or contact us at +91 78913 93505."
+            f"Your payment could not be processed. Please try again or contact us at {SUPPORT_PHONE}."
         )
 
         logger.info(f"Order {order_id}: payment failed — {error_desc}")
@@ -288,8 +287,12 @@ async def _create_razorpay_order(
 
 def _verify_razorpay_signature(payload: dict, signature: str) -> bool:
     """Verify Razorpay webhook signature using HMAC-SHA256."""
-    if not RAZORPAY_WEBHOOK_SECRET or not signature:
-        return True  # Skip verification if not configured
+    if not RAZORPAY_WEBHOOK_SECRET:
+        logger.error("RAZORPAY_WEBHOOK_SECRET not set — rejecting webhook")
+        return False
+    if not signature:
+        logger.warning("Razorpay webhook missing X-Razorpay-Signature header")
+        return False
 
     try:
         payload_json = json.dumps(payload, separators=(",", ":"))

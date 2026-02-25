@@ -511,6 +511,7 @@
     <script>
     let currentTab = 'calls';
     let currentKnowledgeFile = null;
+    let knowledgeDirty = false;
     let autoRefreshInterval = null;
     let inboxPollInterval = null;
     let selectedConvId = null;
@@ -575,9 +576,23 @@
         showLogin();
     }
 
+    function getCsrfToken() {
+        const match = document.cookie.match(/(?:^|; )csrf_token=([^;]*)/);
+        return match ? decodeURIComponent(match[1]) : '';
+    }
+
     async function authFetch(url, options = {}) {
+        // Auto-add CSRF token header for mutating requests
+        if (options.method && options.method !== 'GET') {
+            options.headers = options.headers || {};
+            options.headers['X-CSRF-Token'] = getCsrfToken();
+        }
         const res = await fetch(url, options);
         if (res.status === 401) { showLogin(); throw new Error('Unauthorized'); }
+        if (!res.ok) {
+            const errorText = await res.text().catch(() => res.statusText);
+            throw new Error(errorText || `HTTP ${res.status}`);
+        }
         return res;
     }
 
@@ -691,17 +706,18 @@
             tbody.innerHTML = calls.map(c => {
                 const isHandoff = c.status === 'handoff_pending';
                 const recordingSrc = c.recording_path ? `/api/recordings/${c.id}` : '';
+                const safeId = escapeHtml(c.id);
                 return `
-                    <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="toggleTranscript('call-${c.id}')">
+                    <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="toggleTranscript('call-${safeId}')">
                         <td class="px-4 py-2">${escapeHtml(c.caller_name || '-')}</td>
                         <td class="px-4 py-2 font-mono text-xs">${escapeHtml(c.caller_phone || '-')}</td>
                         <td class="px-4 py-2">${formatDuration(c.duration_seconds)}</td>
                         <td class="px-4 py-2">${statusBadge(c.status)}</td>
                         <td class="px-4 py-2">${topicBadges(c.topics)}</td>
                         <td class="px-4 py-2 text-xs text-gray-500">${formatTime(c.connected_at || c.created_at)}</td>
-                        <td class="px-4 py-2">${isHandoff ? `<button onclick="event.stopPropagation(); resolveCall('${c.id}')" class="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded hover:bg-orange-200">Resolve</button>` : ''}</td>
+                        <td class="px-4 py-2">${isHandoff ? `<button onclick="event.stopPropagation(); resolveCall('${safeId}')" class="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded hover:bg-orange-200">Resolve</button>` : ''}</td>
                     </tr>
-                    <tr id="transcript-call-${c.id}" class="transcript-row">
+                    <tr id="transcript-call-${safeId}" class="transcript-row">
                         <td colspan="7" class="px-4 py-3 bg-gray-50">
                             <div class="max-w-3xl">
                                 <h4 class="font-medium text-gray-700 mb-2">Transcript</h4>
@@ -732,9 +748,12 @@
                 const preview = lastMsg ? (lastMsg.content || '').substring(0, 50) : 'No messages';
                 const sourceIcon = lastMsg && lastMsg.source === 'manual' ? '(You)' : lastMsg && lastMsg.role === 'assistant' ? '(AI)' : '';
                 const isHandoff = c.status === 'handoff_pending';
+                const safeId = escapeHtml(c.id);
+                const safeContactId = escapeHtml(c.contact_id || '');
+                const safeStatus = escapeHtml(c.status || '');
                 return `
                     <div class="px-3 py-2.5 border-b cursor-pointer hover:bg-gray-50 ${isActive ? 'conv-active' : ''}"
-                        onclick="openConversation('${c.id}', '${escapeHtml(c.name || '')}', '${escapeHtml(c.phone || '')}', '${c.contact_id || ''}', '${c.status}')">
+                        onclick="openConversation('${safeId}', '${escapeHtml(c.name || '')}', '${escapeHtml(c.phone || '')}', '${safeContactId}', '${safeStatus}')">
                         <div class="flex items-center justify-between">
                             <span class="text-sm font-medium text-gray-800 truncate">${escapeHtml(c.name || c.phone || '-')}</span>
                             <span class="text-xs text-gray-400">${formatTimeShort(c.last_message_at)}</span>
@@ -919,12 +938,13 @@
             tbody.innerHTML = contacts.map(c => {
                 const tags = Array.isArray(c.tags) ? c.tags : [];
                 const tagHtml = tags.length ? tags.map(t => `<span class="badge bg-gray-100 text-gray-600">${escapeHtml(t)}</span>`).join(' ') : '<span class="text-gray-300">-</span>';
+                const safeId = escapeHtml(c.id);
                 return `
                     <tr class="border-b hover:bg-gray-50">
                         <td class="px-4 py-2">${escapeHtml(c.name || '-')}</td>
                         <td class="px-4 py-2 font-mono text-xs">${escapeHtml(c.phone || '-')}</td>
                         <td class="px-4 py-2">
-                            <select class="stage-select badge-${c.stage || 'new'}" onchange="changeStage('${c.id}', this.value)">
+                            <select class="stage-select badge-${escapeHtml(c.stage || 'new')}" onchange="changeStage('${safeId}', this.value)">
                                 ${['new','contacted','interested','enrolled','lost'].map(s => `<option value="${s}" ${s === c.stage ? 'selected' : ''}>${s}</option>`).join('')}
                             </select>
                         </td>
@@ -935,7 +955,7 @@
                         </td>
                         <td class="px-4 py-2 text-xs text-gray-500">${formatTime(c.last_seen)}</td>
                         <td class="px-4 py-2">
-                            <button onclick="editContact('${c.id}')" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">Edit</button>
+                            <button onclick="editContact('${safeId}')" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">Edit</button>
                         </td>
                     </tr>`;
             }).join('');
@@ -1136,18 +1156,19 @@
             empty.classList.add('hidden');
             tbody.innerHTML = campaigns.map(c => {
                 const statusCls = { 'draft': 'badge-expired', 'running': 'badge-active', 'paused': 'badge-handoff', 'completed': 'badge-completed', 'failed': 'badge-lost' }[c.status] || 'badge-expired';
+                const safeId = escapeHtml(c.id);
                 return `
-                    <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="openCampaignDetail('${c.id}')">
+                    <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="openCampaignDetail('${safeId}')">
                         <td class="px-4 py-2 font-medium">${escapeHtml(c.name)}</td>
                         <td class="px-4 py-2 text-xs font-mono">${escapeHtml(c.template_name)}</td>
-                        <td class="px-4 py-2"><span class="badge ${statusCls}">${c.status}</span></td>
+                        <td class="px-4 py-2"><span class="badge ${statusCls}">${escapeHtml(c.status)}</span></td>
                         <td class="px-4 py-2">${c.recipient_count || 0}</td>
                         <td class="px-4 py-2">${c.sent_count || 0}</td>
                         <td class="px-4 py-2">${c.delivered_count || 0}</td>
                         <td class="px-4 py-2 text-xs text-gray-500">${formatTime(c.created_at)}</td>
                         <td class="px-4 py-2">
-                            ${c.status === 'draft' ? `<button onclick="event.stopPropagation(); quickStartCampaign('${c.id}')" class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200">Start</button>` : ''}
-                            ${c.status === 'running' ? `<button onclick="event.stopPropagation(); quickPauseCampaign('${c.id}')" class="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded hover:bg-yellow-200">Pause</button>` : ''}
+                            ${c.status === 'draft' ? `<button onclick="event.stopPropagation(); quickStartCampaign('${safeId}')" class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200">Start</button>` : ''}
+                            ${c.status === 'running' ? `<button onclick="event.stopPropagation(); quickPauseCampaign('${safeId}')" class="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded hover:bg-yellow-200">Pause</button>` : ''}
                         </td>
                     </tr>`;
             }).join('');
@@ -1254,7 +1275,7 @@
             await authFetch(`/api/campaigns/${currentCampaignId}/start`, { method: 'POST' });
             openCampaignDetail(currentCampaignId);
             loadCampaigns();
-        } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to start: ' + (await e.response?.text?.() || e.message)); }
+        } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to start: ' + e.message); }
     }
 
     async function pauseCampaign() {
@@ -1436,12 +1457,16 @@
     }
 
     async function openKnowledgeFile(filename) {
+        if (knowledgeDirty && !confirm('You have unsaved changes. Discard them?')) return;
         try {
             const res = await authFetch(`/api/knowledge/${filename}`);
             const data = await res.json();
             currentKnowledgeFile = filename;
+            knowledgeDirty = false;
             document.getElementById('editor-filename').textContent = filename;
-            document.getElementById('editor-content').value = data.content;
+            const editor = document.getElementById('editor-content');
+            editor.value = data.content;
+            editor.oninput = () => { knowledgeDirty = true; };
             document.getElementById('editor-actions').classList.remove('hidden');
             document.getElementById('editor-status').textContent = '';
             loadKnowledgeFiles();
@@ -1457,12 +1482,14 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ content }),
             });
+            knowledgeDirty = false;
             document.getElementById('editor-status').textContent = 'Saved at ' + new Date().toLocaleTimeString();
             loadKnowledgeFiles();
         } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to save: ' + e.message); }
     }
 
     async function createNewFile() {
+        if (knowledgeDirty && !confirm('You have unsaved changes. Discard them?')) return;
         const name = prompt('Enter filename (e.g. new_topic.md):');
         if (!name) return;
         const filename = name.endsWith('.md') ? name : name + '.md';

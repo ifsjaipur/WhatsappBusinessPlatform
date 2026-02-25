@@ -11,14 +11,30 @@ from pathlib import Path
 import aiosqlite
 from loguru import logger
 
+
+def _validate_columns(kwargs: dict, allowed: set) -> None:
+    """Validate that all kwargs keys are in the allowed column set.
+
+    Prevents SQL injection via dynamic column names in UPDATE queries.
+    """
+    invalid = set(kwargs.keys()) - allowed
+    if invalid:
+        raise ValueError(f"Invalid column(s): {invalid}. Allowed: {allowed}")
+
 DB_DIR = Path(__file__).parent / "data"
 DB_PATH = DB_DIR / "calls.db"
+
+
+async def _enable_foreign_keys(db):
+    """Enable SQLite foreign key enforcement for a connection."""
+    await db.execute("PRAGMA foreign_keys = ON")
 
 
 async def init_db():
     """Create all tables. Called once at server startup."""
     DB_DIR.mkdir(exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as db:
+        await _enable_foreign_keys(db)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS calls (
                 id               TEXT PRIMARY KEY,
@@ -89,13 +105,22 @@ async def create_call_record(call_id: str, caller_phone: str, caller_name: str, 
     logger.debug(f"Call {call_id}: DB record created for {caller_phone}")
 
 
+_CALLS_ALLOWED_COLUMNS = {
+    "caller_phone", "caller_name", "connected_at", "disconnected_at",
+    "duration_seconds", "transcript", "recording_path", "handoff_requested",
+    "handoff_reason", "topics", "status",
+}
+
+
 async def complete_call_record(call_id: str, **kwargs):
-    """Update call record when call ends. Accepts any column as keyword argument."""
+    """Update call record when call ends. Accepts whitelisted columns as keyword arguments."""
     if not kwargs:
         return
+    _validate_columns(kwargs, _CALLS_ALLOWED_COLUMNS)
     set_clause = ", ".join(f"{k} = ?" for k in kwargs)
     values = list(kwargs.values()) + [call_id]
     async with aiosqlite.connect(DB_PATH) as db:
+        await _enable_foreign_keys(db)
         await db.execute(f"UPDATE calls SET {set_clause} WHERE id = ?", values)
         await db.commit()
     logger.debug(f"Call {call_id}: DB record updated")
@@ -116,7 +141,7 @@ async def get_call(call_id: str) -> dict | None:
                     try:
                         record[field] = json.loads(record[field])
                     except (json.JSONDecodeError, TypeError):
-                        pass
+                        logger.warning(f"Call {call_id}: failed to parse JSON field '{field}'")
             return record
 
 
@@ -136,7 +161,7 @@ async def get_recent_calls(limit: int = 50) -> list[dict]:
                         try:
                             record[field] = json.loads(record[field])
                         except (json.JSONDecodeError, TypeError):
-                            pass
+                            logger.warning(f"Call {record.get('id', '?')}: failed to parse JSON field '{field}'")
                 results.append(record)
             return results
 

@@ -13,6 +13,8 @@ WhatsApp webhook events and routes them to the appropriate handler:
 All message types auto-create a contact in the mini CRM.
 """
 
+import os
+
 from loguru import logger
 
 from campaign_db import update_recipient_by_wamid
@@ -21,6 +23,8 @@ from chatbot import handle_text_message
 from contacts_db import get_or_create_contact
 from orders import process_incoming_order
 from whatsapp_messaging import mark_message_as_read, send_whatsapp_text
+
+SUPPORT_PHONE = os.getenv("IFS_SUPPORT_PHONE", "+91 78913 93505")
 
 
 async def route_webhook(body: dict, knowledge_context: str) -> dict:
@@ -192,7 +196,7 @@ async def _handle_media(
     )
 
     # Auto-reply acknowledging the media
-    reply = "We received your file. Our team will review it. For immediate help, call us at +91 78913 93505."
+    reply = f"We received your file. Our team will review it. For immediate help, call us at {SUPPORT_PHONE}."
     await send_whatsapp_text(sender_phone, reply)
     await add_message(conv_id, "assistant", reply, direction="outbound", source="ai")
 
