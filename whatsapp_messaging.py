@@ -188,39 +188,64 @@ async def send_whatsapp_template(
         return {"success": False, "error": str(e)[:200]}
 
 
+async def _resolve_waba_id() -> str:
+    """Resolve the WhatsApp Business Account ID.
+
+    Checks env var first, then queries the Meta Graph API using the phone number ID.
+    Caches the result for subsequent calls.
+    """
+    # Check env var
+    waba_id = os.getenv("WHATSAPP_BUSINESS_ACCOUNT_ID", "")
+    if waba_id:
+        return waba_id
+
+    # Resolve from phone number ID
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}"}
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{WHATSAPP_PHONE_NUMBER_ID}?fields=whatsapp_business_account"
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    waba_id = data.get("whatsapp_business_account", {}).get("id", "")
+                    if waba_id:
+                        logger.info(f"Resolved WABA ID: {waba_id}")
+                        return waba_id
+                    else:
+                        logger.warning("WABA ID not found in phone number response. "
+                                       "Set WHATSAPP_BUSINESS_ACCOUNT_ID env var manually.")
+                else:
+                    body = await resp.text()
+                    logger.warning(f"WABA ID lookup failed ({resp.status}): {body[:200]}. "
+                                   "Set WHATSAPP_BUSINESS_ACCOUNT_ID env var manually.")
+    except Exception as e:
+        logger.warning(f"Failed to resolve WABA ID: {e}. "
+                       "Set WHATSAPP_BUSINESS_ACCOUNT_ID env var manually.")
+    return ""
+
+
 async def get_whatsapp_templates() -> list[dict]:
     """Fetch message templates from Meta Graph API with full details.
 
-    First resolves the WABA ID from the phone number, then fetches templates
-    using the WABA endpoint which returns richer data (category, components, etc.).
-    Falls back to phone-number-level endpoint if WABA lookup fails.
+    Templates are only available at the WABA (WhatsApp Business Account) level.
+    The WABA ID is resolved from WHATSAPP_BUSINESS_ACCOUNT_ID env var or
+    auto-detected from the phone number ID.
 
     Returns list of template dicts with: name, status, language, category, components
     """
     if not all([WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID]):
+        logger.warning("WhatsApp credentials not configured, cannot fetch templates")
+        return []
+
+    waba_id = await _resolve_waba_id()
+    if not waba_id:
+        logger.error("Cannot fetch templates: WABA ID not available. "
+                     "Set WHATSAPP_BUSINESS_ACCOUNT_ID in your environment variables. "
+                     "Find it in Meta Business Suite > WhatsApp Manager > Account settings.")
         return []
 
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}"}
-    waba_id = os.getenv("WHATSAPP_BUSINESS_ACCOUNT_ID", "")
-
-    # Try to resolve WABA ID from phone number if not configured
-    if not waba_id:
-        try:
-            async with aiohttp.ClientSession() as session:
-                phone_url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{WHATSAPP_PHONE_NUMBER_ID}?fields=whatsapp_business_account"
-                async with session.get(phone_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        waba_id = data.get("whatsapp_business_account", {}).get("id", "")
-        except Exception as e:
-            logger.warning(f"Failed to resolve WABA ID: {e}")
-
-    # Use WABA endpoint if we have the ID, otherwise fall back
-    if waba_id:
-        base_url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{waba_id}/message_templates"
-    else:
-        base_url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{WHATSAPP_PHONE_NUMBER_ID}/message_templates"
-
+    base_url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{waba_id}/message_templates"
     all_templates = []
     url = f"{base_url}?limit=100&fields=name,status,language,category,components"
 
@@ -244,7 +269,7 @@ async def get_whatsapp_templates() -> list[dict]:
         logger.error(f"Failed to fetch templates: {e}")
         return all_templates
 
-    logger.info(f"Fetched {len(all_templates)} WhatsApp templates")
+    logger.info(f"Fetched {len(all_templates)} WhatsApp templates from WABA {waba_id}")
     return all_templates
 
 

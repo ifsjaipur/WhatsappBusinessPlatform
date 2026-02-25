@@ -1589,9 +1589,14 @@
         try {
             const res = await authFetch('/api/templates');
             const data = await res.json();
-            _templateCache = (data.templates || []).filter(t => t.status === 'APPROVED');
+            const allTemplates = data.templates || [];
+            _templateCache = allTemplates.filter(t => t.status === 'APPROVED');
+            if (!allTemplates.length) {
+                select.innerHTML = '<option value="">No templates found — check WHATSAPP_BUSINESS_ACCOUNT_ID env var</option>';
+                return;
+            }
             if (!_templateCache.length) {
-                select.innerHTML = '<option value="">No approved templates found</option>';
+                select.innerHTML = `<option value="">0 approved of ${allTemplates.length} templates (all ${allTemplates.map(t=>t.status).filter((v,i,a)=>a.indexOf(v)===i).join('/')})</option>`;
                 return;
             }
             select.innerHTML = '<option value="">-- Select a template --</option>' + _templateCache.map(t => {
