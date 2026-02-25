@@ -149,6 +149,7 @@
                         <form onsubmit="sendInboxReply(event)" class="flex gap-2">
                             <input id="inbox-reply-input" type="text" placeholder="Type a reply..."
                                 class="flex-1 border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <button type="button" onclick="showInteractiveModal()" class="bg-indigo-500 text-white px-3 py-2 rounded text-sm font-medium hover:bg-indigo-600" title="Send interactive message">Buttons</button>
                             <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-600">Send</button>
                         </form>
                     </div>
@@ -250,6 +251,7 @@
                         <tr>
                             <th class="text-left px-4 py-2 font-medium text-gray-600">Name</th>
                             <th class="text-left px-4 py-2 font-medium text-gray-600">Template</th>
+                            <th class="text-left px-4 py-2 font-medium text-gray-600">Type</th>
                             <th class="text-left px-4 py-2 font-medium text-gray-600">Status</th>
                             <th class="text-left px-4 py-2 font-medium text-gray-600">Recipients</th>
                             <th class="text-left px-4 py-2 font-medium text-gray-600">Sent</th>
@@ -410,33 +412,44 @@
 
         <!-- Create Campaign Modal -->
         <div id="campaign-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
-                <h3 class="text-lg font-bold text-gray-900 mb-4">Create Campaign</h3>
-                <div class="space-y-3">
-                    <div>
-                        <label class="block text-xs font-medium text-gray-500 mb-1">Campaign Name</label>
-                        <input id="campaign-name" type="text" placeholder="e.g. March Admissions"
-                            class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+            <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl mx-4 max-h-[85vh] overflow-y-auto">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-bold text-gray-900">Create Campaign</h3>
+                    <button onclick="closeCampaignModal()" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- Left: Form -->
+                    <div class="space-y-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Campaign Name</label>
+                            <input id="campaign-name" type="text" placeholder="e.g. March Admissions"
+                                class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Template</label>
+                            <select id="campaign-template" onchange="onTemplateSelected()" class="w-full border rounded px-3 py-1.5 text-sm">
+                                <option value="">Loading templates...</option>
+                            </select>
+                            <p class="text-xs text-gray-400 mt-1">Templates are managed in Meta Business Manager</p>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Rate Limit (messages/min)</label>
+                            <input id="campaign-rate" type="number" value="60" min="1" max="200"
+                                class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        </div>
+                        <!-- Template Variables -->
+                        <div id="campaign-vars-section" class="hidden">
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Template Variables</label>
+                            <div id="campaign-vars-list" class="space-y-2"></div>
+                            <p class="text-xs text-gray-400 mt-1">Use <code class="bg-gray-100 px-1 rounded">{{name}}</code> to auto-fill recipient's name</p>
+                        </div>
                     </div>
+                    <!-- Right: Template Preview -->
                     <div>
-                        <label class="block text-xs font-medium text-gray-500 mb-1">Template</label>
-                        <select id="campaign-template" class="w-full border rounded px-3 py-1.5 text-sm">
-                            <option value="">Loading templates...</option>
-                        </select>
-                        <p class="text-xs text-gray-400 mt-1">Templates are managed in Meta Business Manager</p>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-500 mb-1">Language</label>
-                        <select id="campaign-language" class="w-full border rounded px-3 py-1.5 text-sm">
-                            <option value="en">English</option>
-                            <option value="hi">Hindi</option>
-                            <option value="en_US">English (US)</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-500 mb-1">Rate Limit (messages/min)</label>
-                        <input id="campaign-rate" type="number" value="60" min="1" max="200"
-                            class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        <label class="block text-xs font-medium text-gray-500 mb-2">Template Preview</label>
+                        <div id="campaign-template-preview" class="bg-gray-50 border rounded p-3 min-h-[200px]">
+                            <p class="text-xs text-gray-400 text-center mt-8">Select a template to preview</p>
+                        </div>
                     </div>
                 </div>
                 <div class="flex gap-2 justify-end mt-4">
@@ -448,13 +461,20 @@
 
         <!-- Campaign Detail Modal -->
         <div id="campaign-detail-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto">
+            <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-3xl mx-4 max-h-[85vh] overflow-y-auto">
                 <div class="flex items-center justify-between mb-4">
-                    <h3 id="campaign-detail-title" class="text-lg font-bold text-gray-900">Campaign Detail</h3>
+                    <div>
+                        <h3 id="campaign-detail-title" class="text-lg font-bold text-gray-900">Campaign Detail</h3>
+                        <div class="flex gap-2 mt-1">
+                            <span id="cd-template-name" class="text-xs font-mono text-gray-500"></span>
+                            <span id="cd-category-badge" class="hidden text-xs px-2 py-0.5 rounded-full font-medium"></span>
+                        </div>
+                    </div>
                     <button onclick="closeCampaignDetailModal()" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
                 </div>
+                <!-- Stats -->
                 <div id="campaign-detail-info" class="space-y-3 mb-4">
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
                         <div class="bg-gray-50 rounded p-2 text-center">
                             <p class="text-xs text-gray-500">Total</p>
                             <p id="cd-total" class="text-lg font-bold">-</p>
@@ -467,25 +487,63 @@
                             <p class="text-xs text-gray-500">Delivered</p>
                             <p id="cd-delivered" class="text-lg font-bold text-blue-600">-</p>
                         </div>
+                        <div class="bg-purple-50 rounded p-2 text-center">
+                            <p class="text-xs text-gray-500">Read</p>
+                            <p id="cd-read" class="text-lg font-bold text-purple-600">-</p>
+                        </div>
                         <div class="bg-red-50 rounded p-2 text-center">
                             <p class="text-xs text-gray-500">Failed</p>
                             <p id="cd-failed" class="text-lg font-bold text-red-600">-</p>
                         </div>
                     </div>
                 </div>
-                <div class="flex gap-2 mb-4">
+                <!-- Template Variables Editor -->
+                <div id="cd-vars-section" class="hidden mb-4 p-3 bg-blue-50 rounded border border-blue-200">
+                    <div class="flex items-center justify-between mb-2">
+                        <label class="text-xs font-medium text-blue-700">Template Variables</label>
+                        <button onclick="saveCampaignParams()" class="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600">Save Variables</button>
+                    </div>
+                    <div id="cd-vars-list" class="space-y-2"></div>
+                    <p class="text-xs text-blue-400 mt-1">Use <code class="bg-blue-100 px-1 rounded">{{name}}</code> for recipient name auto-fill</p>
+                </div>
+                <!-- Action buttons -->
+                <div class="flex flex-wrap gap-2 mb-4">
                     <button id="cd-start-btn" onclick="startCampaign()" class="text-sm bg-green-500 text-white px-3 py-1.5 rounded hover:bg-green-600 hidden">Start Campaign</button>
                     <button id="cd-pause-btn" onclick="pauseCampaign()" class="text-sm bg-yellow-500 text-white px-3 py-1.5 rounded hover:bg-yellow-600 hidden">Pause</button>
-                    <button id="cd-upload-btn" onclick="showCampaignRecipientUpload()" class="text-sm bg-blue-500 text-white px-3 py-1.5 rounded hover:bg-blue-600">Upload Recipients CSV</button>
+                    <button id="cd-upload-btn" onclick="showCampaignRecipientUpload()" class="text-sm bg-blue-500 text-white px-3 py-1.5 rounded hover:bg-blue-600">Upload CSV</button>
+                    <button id="cd-contacts-btn" onclick="showAddFromContacts()" class="text-sm bg-indigo-500 text-white px-3 py-1.5 rounded hover:bg-indigo-600">Add from CRM</button>
                     <button onclick="exportCampaignResults()" class="text-sm bg-gray-200 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-300">Export Results</button>
                     <button onclick="deleteCampaignFromDetail()" class="text-sm bg-red-100 text-red-700 px-3 py-1.5 rounded hover:bg-red-200">Delete</button>
                 </div>
-                <!-- Recipient upload area -->
+                <!-- CSV upload area -->
                 <div id="cd-upload-area" class="hidden mb-4 p-3 bg-gray-50 rounded border">
                     <input id="cd-upload-file" type="file" accept=".csv" onchange="previewCampaignRecipients()" class="text-sm mb-2">
                     <div id="cd-upload-preview" class="hidden text-xs mb-2"></div>
                     <button id="cd-upload-confirm" onclick="confirmCampaignRecipients()" disabled class="text-sm bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600 disabled:opacity-50">Upload</button>
                     <span id="cd-upload-result" class="text-sm ml-2"></span>
+                </div>
+                <!-- Add from CRM Contacts area -->
+                <div id="cd-contacts-area" class="hidden mb-4 p-3 bg-indigo-50 rounded border border-indigo-200">
+                    <p class="text-xs font-medium text-indigo-700 mb-2">Add recipients from CRM contacts</p>
+                    <div class="flex flex-wrap gap-2 items-end">
+                        <div>
+                            <label class="block text-xs text-indigo-600 mb-1">Stage</label>
+                            <select id="cd-contact-stage" class="text-sm border rounded px-2 py-1">
+                                <option value="">All stages</option>
+                                <option value="new">New</option>
+                                <option value="contacted">Contacted</option>
+                                <option value="interested">Interested</option>
+                                <option value="enrolled">Enrolled</option>
+                                <option value="lost">Lost</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-indigo-600 mb-1">Tags (comma separated)</label>
+                            <input id="cd-contact-tags" type="text" placeholder="e.g. ca, mba" class="text-sm border rounded px-2 py-1 w-40">
+                        </div>
+                        <button onclick="addRecipientsFromContacts()" class="text-sm bg-indigo-500 text-white px-3 py-1 rounded hover:bg-indigo-600">Add Contacts</button>
+                        <span id="cd-contacts-result" class="text-sm ml-2"></span>
+                    </div>
                 </div>
                 <!-- Recipients table -->
                 <div class="bg-white border rounded overflow-x-auto max-h-64 overflow-y-auto">
@@ -501,6 +559,66 @@
                         </thead>
                         <tbody id="cd-recipients-body"></tbody>
                     </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Interactive Message Modal -->
+        <div id="interactive-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-lg mx-4 max-h-[85vh] overflow-y-auto">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-bold text-gray-900">Send Interactive Message</h3>
+                    <button onclick="closeInteractiveModal()" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+                </div>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Type</label>
+                        <select id="im-type" onchange="onInteractiveTypeChange()" class="w-full border rounded px-3 py-1.5 text-sm">
+                            <option value="button">Reply Buttons (max 3)</option>
+                            <option value="list">List Menu (sections + rows)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Body Text</label>
+                        <textarea id="im-body" rows="3" placeholder="Main message text..."
+                            class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Header (optional)</label>
+                        <input id="im-header" type="text" placeholder="Header text"
+                            class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Footer (optional, max 60 chars)</label>
+                        <input id="im-footer" type="text" placeholder="Footer text" maxlength="60"
+                            class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </div>
+                    <!-- Buttons section -->
+                    <div id="im-buttons-section">
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Buttons (max 3, title max 20 chars)</label>
+                        <div id="im-buttons-list" class="space-y-2">
+                            <div class="flex gap-2">
+                                <input type="text" class="im-btn-title flex-1 border rounded px-2 py-1 text-sm" placeholder="Button 1 title" maxlength="20">
+                            </div>
+                            <div class="flex gap-2">
+                                <input type="text" class="im-btn-title flex-1 border rounded px-2 py-1 text-sm" placeholder="Button 2 title (optional)" maxlength="20">
+                            </div>
+                            <div class="flex gap-2">
+                                <input type="text" class="im-btn-title flex-1 border rounded px-2 py-1 text-sm" placeholder="Button 3 title (optional)" maxlength="20">
+                            </div>
+                        </div>
+                    </div>
+                    <!-- List section -->
+                    <div id="im-list-section" class="hidden">
+                        <label class="block text-xs font-medium text-gray-500 mb-1">List Rows (one per line: <code class="bg-gray-100 px-1 rounded">title | description</code>)</label>
+                        <textarea id="im-list-rows" rows="6" placeholder="View Courses | Browse our course catalog&#10;Fee Structure | Check fees and scholarships&#10;Admission Process | Steps to enroll&#10;Contact Us | Talk to our team"
+                            class="w-full border rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"></textarea>
+                        <p class="text-xs text-gray-400 mt-1">Each line becomes a list row. Use | to separate title from description.</p>
+                    </div>
+                </div>
+                <div class="flex gap-2 justify-end mt-4">
+                    <button onclick="closeInteractiveModal()" class="text-sm bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300">Cancel</button>
+                    <button onclick="sendInteractiveMessage()" class="text-sm bg-indigo-500 text-white px-4 py-2 rounded hover:bg-indigo-600">Send</button>
                 </div>
             </div>
         </div>
@@ -847,6 +965,84 @@
         }
     }
 
+    // --- Interactive Messages ---
+
+    function showInteractiveModal() {
+        if (!selectedConvId) { alert('Select a conversation first'); return; }
+        document.getElementById('im-body').value = '';
+        document.getElementById('im-header').value = '';
+        document.getElementById('im-footer').value = '';
+        document.getElementById('im-type').value = 'button';
+        document.querySelectorAll('.im-btn-title').forEach(el => el.value = '');
+        document.getElementById('im-list-rows').value = '';
+        onInteractiveTypeChange();
+        document.getElementById('interactive-modal').classList.remove('hidden');
+    }
+
+    function closeInteractiveModal() {
+        document.getElementById('interactive-modal').classList.add('hidden');
+    }
+
+    function onInteractiveTypeChange() {
+        const type = document.getElementById('im-type').value;
+        document.getElementById('im-buttons-section').classList.toggle('hidden', type !== 'button');
+        document.getElementById('im-list-section').classList.toggle('hidden', type !== 'list');
+    }
+
+    async function sendInteractiveMessage() {
+        const type = document.getElementById('im-type').value;
+        const bodyText = document.getElementById('im-body').value.trim();
+        if (!bodyText) { alert('Body text is required'); return; }
+        if (!selectedConvContactId) { alert('No contact selected'); return; }
+
+        // Get phone from the thread header
+        const phone = document.getElementById('inbox-thread-phone').textContent.trim();
+        if (!phone) { alert('No phone number for this contact'); return; }
+
+        const headerText = document.getElementById('im-header').value.trim();
+        const footerText = document.getElementById('im-footer').value.trim();
+
+        const payload = {
+            to: phone,
+            type: type,
+            body: bodyText,
+        };
+        if (headerText) payload.header = { type: 'text', text: headerText };
+        if (footerText) payload.footer = footerText;
+
+        if (type === 'button') {
+            const buttons = [];
+            document.querySelectorAll('.im-btn-title').forEach((el, i) => {
+                const title = el.value.trim();
+                if (title) buttons.push({ id: `btn_${i + 1}`, title });
+            });
+            if (!buttons.length) { alert('At least one button is required'); return; }
+            payload.buttons = buttons;
+        } else if (type === 'list') {
+            const rowsText = document.getElementById('im-list-rows').value.trim();
+            if (!rowsText) { alert('At least one list row is required'); return; }
+            const rows = rowsText.split('\n').filter(Boolean).map((line, i) => {
+                const parts = line.split('|').map(p => p.trim());
+                return { id: `row_${i + 1}`, title: (parts[0] || '').substring(0, 24), description: (parts[1] || '').substring(0, 72) };
+            });
+            if (!rows.length) { alert('At least one list row is required'); return; }
+            payload.sections = [{ title: 'Options', rows }];
+        }
+
+        try {
+            await authFetch('/api/whatsapp/send-interactive', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            closeInteractiveModal();
+            // Refresh the conversation thread
+            if (selectedConvId) await loadConversationThread(selectedConvId);
+        } catch (e) {
+            if (e.message !== 'Unauthorized') alert('Failed to send: ' + e.message);
+        }
+    }
+
     function updateAIBadge(enabled) {
         const badge = document.getElementById('inbox-ai-badge');
         const btn = document.getElementById('inbox-ai-toggle');
@@ -1142,6 +1338,9 @@
     let currentCampaignId = null;
     let campaignRecipientRecords = [];
 
+    // --- Template cache for campaign UI ---
+    let _templateCache = [];
+
     async function loadCampaigns() {
         const status = document.getElementById('campaigns-status-filter').value;
         const params = new URLSearchParams({ limit: '100' });
@@ -1157,10 +1356,14 @@
             tbody.innerHTML = campaigns.map(c => {
                 const statusCls = { 'draft': 'badge-expired', 'running': 'badge-active', 'paused': 'badge-handoff', 'completed': 'badge-completed', 'failed': 'badge-lost' }[c.status] || 'badge-expired';
                 const safeId = escapeHtml(c.id);
+                const cat = (c.template_category || '').toUpperCase();
+                const catCls = cat === 'MARKETING' ? 'bg-orange-100 text-orange-700' : cat === 'UTILITY' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500';
+                const catLabel = cat || '-';
                 return `
                     <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="openCampaignDetail('${safeId}')">
                         <td class="px-4 py-2 font-medium">${escapeHtml(c.name)}</td>
                         <td class="px-4 py-2 text-xs font-mono">${escapeHtml(c.template_name)}</td>
+                        <td class="px-4 py-2"><span class="text-xs px-2 py-0.5 rounded-full font-medium ${catCls}">${catLabel}</span></td>
                         <td class="px-4 py-2"><span class="badge ${statusCls}">${escapeHtml(c.status)}</span></td>
                         <td class="px-4 py-2">${c.recipient_count || 0}</td>
                         <td class="px-4 py-2">${c.sent_count || 0}</td>
@@ -1169,6 +1372,7 @@
                         <td class="px-4 py-2">
                             ${c.status === 'draft' ? `<button onclick="event.stopPropagation(); quickStartCampaign('${safeId}')" class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200">Start</button>` : ''}
                             ${c.status === 'running' ? `<button onclick="event.stopPropagation(); quickPauseCampaign('${safeId}')" class="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded hover:bg-yellow-200">Pause</button>` : ''}
+                            ${c.status === 'paused' ? `<button onclick="event.stopPropagation(); quickStartCampaign('${safeId}')" class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200">Resume</button>` : ''}
                         </td>
                     </tr>`;
             }).join('');
@@ -1178,6 +1382,9 @@
     function showCreateCampaignModal() {
         document.getElementById('campaign-name').value = '';
         document.getElementById('campaign-rate').value = '60';
+        document.getElementById('campaign-vars-section').classList.add('hidden');
+        document.getElementById('campaign-vars-list').innerHTML = '';
+        document.getElementById('campaign-template-preview').innerHTML = '<p class="text-xs text-gray-400 text-center mt-8">Select a template to preview</p>';
         document.getElementById('campaign-modal').classList.remove('hidden');
         loadTemplateDropdown();
     }
@@ -1192,24 +1399,147 @@
         try {
             const res = await authFetch('/api/templates');
             const data = await res.json();
-            const templates = (data.templates || []).filter(t => t.status === 'APPROVED');
-            if (!templates.length) {
+            _templateCache = (data.templates || []).filter(t => t.status === 'APPROVED');
+            if (!_templateCache.length) {
                 select.innerHTML = '<option value="">No approved templates found</option>';
                 return;
             }
-            select.innerHTML = templates.map(t =>
-                `<option value="${escapeHtml(t.name)}">${escapeHtml(t.name)} (${t.language})</option>`
-            ).join('');
+            select.innerHTML = '<option value="">-- Select a template --</option>' + _templateCache.map(t => {
+                const cat = (t.category || '').toUpperCase();
+                const catLabel = cat === 'MARKETING' ? '[MKT]' : cat === 'UTILITY' ? '[UTL]' : `[${cat}]`;
+                return `<option value="${escapeHtml(t.name)}" data-lang="${escapeHtml(t.language || 'en')}" data-category="${escapeHtml(t.category || '')}">${catLabel} ${escapeHtml(t.name)} (${t.language || 'en'})</option>`;
+            }).join('');
         } catch (e) {
-            select.innerHTML = '<option value="">Enter template name manually</option>';
+            select.innerHTML = '<option value="">Failed to load templates</option>';
         }
+    }
+
+    function onTemplateSelected() {
+        const select = document.getElementById('campaign-template');
+        const templateName = select.value;
+        const previewEl = document.getElementById('campaign-template-preview');
+        const varsSection = document.getElementById('campaign-vars-section');
+        const varsList = document.getElementById('campaign-vars-list');
+
+        if (!templateName) {
+            previewEl.innerHTML = '<p class="text-xs text-gray-400 text-center mt-8">Select a template to preview</p>';
+            varsSection.classList.add('hidden');
+            return;
+        }
+
+        const tpl = _templateCache.find(t => t.name === templateName);
+        if (!tpl) return;
+
+        // Auto-set language from template
+        const opt = select.selectedOptions[0];
+        const lang = opt?.dataset?.lang || tpl.language || 'en';
+
+        // Render preview
+        previewEl.innerHTML = renderTemplatePreview(tpl);
+
+        // Extract variables and show editor
+        const vars = extractTemplateVariables(tpl);
+        if (vars.length > 0) {
+            varsSection.classList.remove('hidden');
+            varsList.innerHTML = vars.map((v, i) => `
+                <div class="flex items-center gap-2">
+                    <span class="text-xs font-mono bg-gray-200 px-2 py-1 rounded whitespace-nowrap">${escapeHtml(v.component)}{{${v.index}}}</span>
+                    <input type="text" class="campaign-var-input flex-1 border rounded px-2 py-1 text-sm" data-component="${escapeHtml(v.component)}" data-index="${v.index}"
+                        placeholder="${escapeHtml(v.example || 'Value for variable ' + v.index)}" value="${escapeHtml(v.example || '')}">
+                </div>
+            `).join('');
+        } else {
+            varsSection.classList.add('hidden');
+            varsList.innerHTML = '';
+        }
+    }
+
+    function renderTemplatePreview(tpl) {
+        const cat = (tpl.category || '').toUpperCase();
+        const catCls = cat === 'MARKETING' ? 'bg-orange-100 text-orange-700' : cat === 'UTILITY' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600';
+        let html = `<div class="mb-2 flex items-center gap-2">
+            <span class="text-xs font-mono font-bold">${escapeHtml(tpl.name)}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full font-medium ${catCls}">${cat || 'OTHER'}</span>
+            <span class="text-xs text-gray-400">${escapeHtml(tpl.language || 'en')}</span>
+        </div>`;
+
+        // WhatsApp-style message bubble
+        html += '<div class="bg-white border rounded-lg p-3 shadow-sm space-y-2">';
+        const components = tpl.components || [];
+        for (const comp of components) {
+            if (comp.type === 'HEADER') {
+                if (comp.format === 'TEXT') {
+                    html += `<p class="text-sm font-bold">${escapeHtml(comp.text || '')}</p>`;
+                } else if (comp.format === 'IMAGE') {
+                    html += '<div class="bg-gray-200 rounded h-24 flex items-center justify-center text-xs text-gray-500">[Image Header]</div>';
+                } else if (comp.format === 'VIDEO') {
+                    html += '<div class="bg-gray-200 rounded h-24 flex items-center justify-center text-xs text-gray-500">[Video Header]</div>';
+                } else if (comp.format === 'DOCUMENT') {
+                    html += '<div class="bg-gray-200 rounded p-2 flex items-center text-xs text-gray-500">[Document Header]</div>';
+                }
+            } else if (comp.type === 'BODY') {
+                const bodyText = (comp.text || '').replace(/\{\{(\d+)\}\}/g, '<span class="bg-yellow-200 px-1 rounded font-mono text-xs">{{$1}}</span>');
+                html += `<p class="text-sm whitespace-pre-wrap">${bodyText}</p>`;
+            } else if (comp.type === 'FOOTER') {
+                html += `<p class="text-xs text-gray-400">${escapeHtml(comp.text || '')}</p>`;
+            } else if (comp.type === 'BUTTONS') {
+                html += '<div class="border-t pt-2 mt-2 space-y-1">';
+                for (const btn of (comp.buttons || [])) {
+                    const btnType = btn.type === 'QUICK_REPLY' ? 'reply' : btn.type === 'URL' ? 'link' : btn.type === 'PHONE_NUMBER' ? 'call' : btn.type?.toLowerCase() || '';
+                    html += `<div class="text-center text-xs text-blue-500 py-1 border rounded">${escapeHtml(btn.text || '')} <span class="text-gray-400">(${btnType})</span></div>`;
+                }
+                html += '</div>';
+            }
+        }
+        html += '</div>';
+        return html;
+    }
+
+    function extractTemplateVariables(tpl) {
+        const vars = [];
+        const components = tpl.components || [];
+        for (const comp of components) {
+            const compType = (comp.type || '').toLowerCase();
+            const text = comp.text || '';
+            const regex = /\{\{(\d+)\}\}/g;
+            let match;
+            while ((match = regex.exec(text)) !== null) {
+                const idx = match[1];
+                // Check for example values
+                let example = '';
+                if (comp.example && comp.example.body_text) {
+                    const exArr = comp.example.body_text[0] || [];
+                    example = exArr[parseInt(idx) - 1] || '';
+                } else if (comp.example && comp.example.header_text) {
+                    const exArr = comp.example.header_text || [];
+                    example = exArr[parseInt(idx) - 1] || '';
+                }
+                vars.push({ component: compType, index: idx, example });
+            }
+        }
+        return vars;
     }
 
     async function createNewCampaign() {
         const name = document.getElementById('campaign-name').value.trim();
-        let template = document.getElementById('campaign-template').value;
+        const select = document.getElementById('campaign-template');
+        let template = select.value;
         if (!template) template = prompt('Enter template name:');
         if (!name || !template) { alert('Name and template are required'); return; }
+
+        // Get category and language from selected template
+        const opt = select.selectedOptions[0];
+        const category = opt?.dataset?.category || '';
+        const tpl = _templateCache.find(t => t.name === template);
+        const language = tpl?.language || 'en';
+
+        // Gather variable values
+        const varInputs = document.querySelectorAll('.campaign-var-input');
+        const templateParams = [];
+        varInputs.forEach(input => {
+            templateParams.push(input.value || '');
+        });
+
         try {
             const res = await authFetch('/api/campaigns', {
                 method: 'POST',
@@ -1217,7 +1547,9 @@
                 body: JSON.stringify({
                     name,
                     template_name: template,
-                    language: document.getElementById('campaign-language').value,
+                    template_category: category,
+                    language,
+                    template_params: templateParams.length ? templateParams : undefined,
                     rate_limit_per_min: parseInt(document.getElementById('campaign-rate').value) || 60,
                 }),
             });
@@ -1234,34 +1566,110 @@
             const res = await authFetch(`/api/campaigns/${campaignId}`);
             const c = await res.json();
             document.getElementById('campaign-detail-title').textContent = c.name;
+            document.getElementById('cd-template-name').textContent = c.template_name;
+
+            // Category badge
+            const catBadge = document.getElementById('cd-category-badge');
+            const cat = (c.template_category || '').toUpperCase();
+            if (cat) {
+                const catCls = cat === 'MARKETING' ? 'bg-orange-100 text-orange-700' : cat === 'UTILITY' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600';
+                catBadge.className = `text-xs px-2 py-0.5 rounded-full font-medium ${catCls}`;
+                catBadge.textContent = cat;
+                catBadge.classList.remove('hidden');
+            } else {
+                catBadge.classList.add('hidden');
+            }
+
+            // Stats
             const stats = c.recipient_stats || {};
             document.getElementById('cd-total').textContent = stats.total || 0;
             document.getElementById('cd-sent').textContent = stats.sent || 0;
             document.getElementById('cd-delivered').textContent = stats.delivered || 0;
+            document.getElementById('cd-read').textContent = stats.read || 0;
             document.getElementById('cd-failed').textContent = stats.failed || 0;
+
             // Show/hide action buttons
             const canStart = c.status === 'draft' || c.status === 'paused';
             const isRunning = c.status === 'running';
             document.getElementById('cd-start-btn').classList.toggle('hidden', !canStart);
             document.getElementById('cd-pause-btn').classList.toggle('hidden', !isRunning);
             document.getElementById('cd-upload-btn').classList.toggle('hidden', isRunning);
+            document.getElementById('cd-contacts-btn').classList.toggle('hidden', isRunning);
+
+            // Template variables editor
+            const varsSection = document.getElementById('cd-vars-section');
+            const varsList = document.getElementById('cd-vars-list');
+            const existingParams = c.template_params || [];
+
+            // Try to find template in cache to get variable info
+            if (!_templateCache.length) {
+                try {
+                    const tRes = await authFetch('/api/templates');
+                    const tData = await tRes.json();
+                    _templateCache = (tData.templates || []).filter(t => t.status === 'APPROVED');
+                } catch (e) { /* ignore */ }
+            }
+            const tpl = _templateCache.find(t => t.name === c.template_name);
+            const vars = tpl ? extractTemplateVariables(tpl) : [];
+
+            if (vars.length > 0) {
+                varsSection.classList.remove('hidden');
+                varsList.innerHTML = vars.map((v, i) => `
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-mono bg-blue-100 px-2 py-1 rounded whitespace-nowrap">${escapeHtml(v.component)}{{${v.index}}}</span>
+                        <input type="text" class="cd-var-input flex-1 border rounded px-2 py-1 text-sm" data-index="${i}"
+                            placeholder="${escapeHtml(v.example || 'Value for {{' + v.index + '}}')}"
+                            value="${escapeHtml(existingParams[i] || v.example || '')}">
+                    </div>
+                `).join('');
+            } else if (existingParams.length > 0) {
+                varsSection.classList.remove('hidden');
+                varsList.innerHTML = existingParams.map((p, i) => `
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-mono bg-blue-100 px-2 py-1 rounded">{{${i + 1}}}</span>
+                        <input type="text" class="cd-var-input flex-1 border rounded px-2 py-1 text-sm" data-index="${i}"
+                            value="${escapeHtml(p || '')}">
+                    </div>
+                `).join('');
+            } else {
+                varsSection.classList.add('hidden');
+            }
+
             // Load recipients
             const rRes = await authFetch(`/api/campaigns/${campaignId}/recipients?limit=200`);
             const rData = await rRes.json();
             const tbody = document.getElementById('cd-recipients-body');
             const recipients = rData.recipients || [];
-            tbody.innerHTML = recipients.map(r => `
+            tbody.innerHTML = recipients.map(r => {
+                const sCls = r.status === 'read' ? 'badge-active' : r.status === 'delivered' || r.status === 'sent' ? 'badge-completed' : r.status === 'failed' ? 'badge-lost' : 'badge-expired';
+                return `
                 <tr class="border-b">
                     <td class="px-3 py-1 font-mono">${escapeHtml(r.phone)}</td>
                     <td class="px-3 py-1">${escapeHtml(r.name || '-')}</td>
-                    <td class="px-3 py-1"><span class="badge badge-${r.status === 'sent' || r.status === 'delivered' || r.status === 'read' ? 'completed' : r.status === 'failed' ? 'lost' : 'expired'}">${r.status}</span></td>
+                    <td class="px-3 py-1"><span class="badge ${sCls}">${r.status}</span></td>
                     <td class="px-3 py-1">${formatTimeShort(r.sent_at)}</td>
                     <td class="px-3 py-1 text-red-500">${escapeHtml(r.error_message || '')}</td>
-                </tr>
-            `).join('') || '<tr><td colspan="5" class="px-3 py-4 text-center text-gray-400">No recipients yet</td></tr>';
+                </tr>`;
+            }).join('') || '<tr><td colspan="5" class="px-3 py-4 text-center text-gray-400">No recipients yet</td></tr>';
             document.getElementById('cd-upload-area').classList.add('hidden');
+            document.getElementById('cd-contacts-area').classList.add('hidden');
             document.getElementById('campaign-detail-modal').classList.remove('hidden');
         } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to load campaign: ' + e.message); }
+    }
+
+    async function saveCampaignParams() {
+        if (!currentCampaignId) return;
+        const inputs = document.querySelectorAll('.cd-var-input');
+        const params = [];
+        inputs.forEach(input => params.push(input.value || ''));
+        try {
+            await authFetch(`/api/campaigns/${currentCampaignId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ template_params: params }),
+            });
+            alert('Variables saved!');
+        } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to save: ' + e.message); }
     }
 
     function closeCampaignDetailModal() {
@@ -1300,11 +1708,42 @@
 
     function showCampaignRecipientUpload() {
         document.getElementById('cd-upload-area').classList.remove('hidden');
+        document.getElementById('cd-contacts-area').classList.add('hidden');
         document.getElementById('cd-upload-file').value = '';
         document.getElementById('cd-upload-preview').classList.add('hidden');
         document.getElementById('cd-upload-confirm').disabled = true;
         document.getElementById('cd-upload-result').textContent = '';
         campaignRecipientRecords = [];
+    }
+
+    function showAddFromContacts() {
+        document.getElementById('cd-contacts-area').classList.remove('hidden');
+        document.getElementById('cd-upload-area').classList.add('hidden');
+        document.getElementById('cd-contacts-result').textContent = '';
+    }
+
+    async function addRecipientsFromContacts() {
+        if (!currentCampaignId) return;
+        const stage = document.getElementById('cd-contact-stage').value;
+        const tagsStr = document.getElementById('cd-contact-tags').value.trim();
+        const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
+        const resultEl = document.getElementById('cd-contacts-result');
+        resultEl.textContent = 'Adding...';
+        resultEl.className = 'text-sm ml-2 text-gray-500';
+        try {
+            const res = await authFetch(`/api/campaigns/${currentCampaignId}/recipients-from-contacts`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ stage, tags }),
+            });
+            const data = await res.json();
+            resultEl.textContent = `Added: ${data.added}, Duplicates: ${data.duplicate || 0}, Invalid: ${data.invalid || 0}`;
+            resultEl.className = 'text-sm ml-2 text-green-600';
+            openCampaignDetail(currentCampaignId);
+        } catch (e) {
+            resultEl.textContent = 'Failed: ' + e.message;
+            resultEl.className = 'text-sm ml-2 text-red-600';
+        }
     }
 
     function previewCampaignRecipients() {

@@ -83,7 +83,11 @@ from knowledge import KNOWLEDGE_DIR, load_knowledge
 from message_router import route_webhook
 from orders import handle_razorpay_webhook
 from orders_db import get_order, get_order_stats, list_orders as list_orders_db
-from whatsapp_messaging import get_whatsapp_templates, send_whatsapp_text
+from whatsapp_messaging import (
+    get_whatsapp_templates,
+    send_interactive_message,
+    send_whatsapp_text,
+)
 
 load_dotenv(override=True)
 
@@ -781,6 +785,7 @@ async def api_create_campaign(request: Request):
         name=name,
         template_name=template_name,
         language=body.get("language", "en"),
+        template_category=body.get("template_category", ""),
         template_params=body.get("template_params"),
         rate_limit_per_min=int(body.get("rate_limit_per_min", 60)),
     )
@@ -900,9 +905,101 @@ async def api_campaign_results(campaign_id: str):
 
 @app.get("/api/templates", dependencies=[Depends(require_auth)])
 async def api_list_templates():
-    """Fetch approved WhatsApp message templates from Meta."""
+    """Fetch WhatsApp message templates from Meta with full details."""
     templates = await get_whatsapp_templates()
     return {"templates": templates, "count": len(templates)}
+
+
+@app.post("/api/whatsapp/send-interactive", dependencies=[Depends(require_auth_csrf)])
+async def api_send_interactive(request: Request):
+    """Send an interactive message (buttons or list) to a WhatsApp user.
+
+    Body: {
+        "to": "919876543210",
+        "type": "button" | "list",
+        "body": "Choose an option:",
+        "buttons": [{"id": "btn_1", "title": "Option 1"}, ...],  // for type=button
+        "sections": [{"title": "Section", "rows": [...]}],        // for type=list
+        "header": {"type": "text", "text": "Header"},             // optional
+        "footer": "Footer text"                                    // optional
+    }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    to_phone = body.get("to", "").strip()
+    msg_type = body.get("type", "").strip()
+    body_text = body.get("body", "").strip()
+
+    if not to_phone or not msg_type or not body_text:
+        raise HTTPException(status_code=400, detail="to, type, and body are required")
+    if msg_type not in ("button", "list"):
+        raise HTTPException(status_code=400, detail="type must be 'button' or 'list'")
+
+    result = await send_interactive_message(
+        to_phone=to_phone,
+        interactive_type=msg_type,
+        body_text=body_text,
+        buttons=body.get("buttons"),
+        sections=body.get("sections"),
+        header=body.get("header"),
+        footer=body.get("footer"),
+    )
+
+    if result["success"]:
+        return result
+    else:
+        raise HTTPException(status_code=400, detail=result.get("error", "Send failed"))
+
+
+@app.post("/api/campaigns/{campaign_id}/recipients-from-contacts", dependencies=[Depends(require_auth_csrf)])
+async def api_add_recipients_from_contacts(campaign_id: str, request: Request):
+    """Add campaign recipients from CRM contacts filtered by stage and/or tags.
+
+    Body: { "stage": "interested", "tags": ["ca", "mba"] }
+    Both filters are optional. If neither is specified, all contacts are added.
+    """
+    campaign = await get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign["status"] == "running":
+        raise HTTPException(status_code=400, detail="Cannot add recipients while running")
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    stage = body.get("stage", "")
+    tags = body.get("tags", [])
+
+    # Fetch contacts matching criteria
+    contacts = await list_contacts(limit=10000, stage=stage)
+
+    # Filter by tags if specified
+    if tags:
+        tag_set = {t.lower().strip() for t in tags}
+        filtered = []
+        for c in contacts:
+            contact_tags = c.get("tags") or []
+            if isinstance(contact_tags, str):
+                import json as _json
+                try:
+                    contact_tags = _json.loads(contact_tags)
+                except Exception:
+                    contact_tags = []
+            if any(t.lower().strip() in tag_set for t in contact_tags):
+                filtered.append(c)
+        contacts = filtered
+
+    if not contacts:
+        return {"added": 0, "duplicate": 0, "invalid": 0, "message": "No matching contacts found"}
+
+    records = [{"phone": c["phone"], "name": c.get("name", "")} for c in contacts if c.get("phone")]
+    result = await add_recipients(campaign_id, records)
+    return result
 
 
 # --- Protected: Orders API ---

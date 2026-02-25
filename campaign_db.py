@@ -26,6 +26,7 @@ async def init_campaign_tables():
                 id                TEXT PRIMARY KEY,
                 name              TEXT NOT NULL,
                 template_name     TEXT NOT NULL,
+                template_category TEXT DEFAULT '',
                 language          TEXT DEFAULT 'en',
                 template_params   TEXT DEFAULT '[]',
                 status            TEXT DEFAULT 'draft',
@@ -40,6 +41,12 @@ async def init_campaign_tables():
                 created_at        TEXT DEFAULT (datetime('now'))
             )
         """)
+        # Migration: add template_category column if missing
+        try:
+            await db.execute("ALTER TABLE campaigns ADD COLUMN template_category TEXT DEFAULT ''")
+            await db.commit()
+        except Exception:
+            pass  # Column already exists
         await db.execute("""
             CREATE TABLE IF NOT EXISTS campaign_recipients (
                 id              TEXT PRIMARY KEY,
@@ -80,6 +87,7 @@ async def create_campaign(
     name: str,
     template_name: str,
     language: str = "en",
+    template_category: str = "",
     template_params: list | None = None,
     rate_limit_per_min: int = 60,
 ) -> dict:
@@ -90,9 +98,9 @@ async def create_campaign(
 
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            """INSERT INTO campaigns (id, name, template_name, language, template_params,
-               rate_limit_per_min, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (campaign_id, name, template_name, language, params_json, rate_limit_per_min, now),
+            """INSERT INTO campaigns (id, name, template_name, template_category, language, template_params,
+               rate_limit_per_min, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (campaign_id, name, template_name, template_category, language, params_json, rate_limit_per_min, now),
         )
         await db.commit()
 
@@ -133,7 +141,7 @@ async def list_campaigns(limit: int = 100, status: str = "") -> list[dict]:
 
 
 _CAMPAIGN_ALLOWED_COLUMNS = {
-    "name", "template_name", "language", "template_params", "status",
+    "name", "template_name", "template_category", "language", "template_params", "status",
     "recipient_count", "sent_count", "delivered_count", "read_count",
     "failed_count", "rate_limit_per_min", "started_at", "completed_at",
 }

@@ -101,18 +101,20 @@ async def run_campaign(campaign_id: str) -> None:
 
                 try:
                     send_start = time.monotonic()
-                    success = await send_whatsapp_template(
+                    result = await send_whatsapp_template(
                         to_phone=phone,
                         template_name=template_name,
                         language=language,
                         components=components if components else None,
                     )
 
-                    if success:
-                        await update_recipient_status(rid, "sent")
+                    if result.get("success"):
+                        wa_mid = result.get("wa_message_id", "")
+                        await update_recipient_status(rid, "sent", wa_message_id=wa_mid)
                         total_sent += 1
                     else:
-                        await update_recipient_status(rid, "failed", error_message="API returned error")
+                        error_msg = result.get("error", "API returned error")
+                        await update_recipient_status(rid, "failed", error_message=error_msg)
                         total_failed += 1
 
                     # Rate limiting

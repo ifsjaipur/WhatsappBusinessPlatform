@@ -123,7 +123,7 @@ async def send_whatsapp_template(
     template_name: str,
     language: str = "en",
     components: list | None = None,
-) -> bool:
+) -> dict:
     """Send a template message via WhatsApp Cloud API.
 
     Template messages can be sent outside the 24-hour messaging window.
@@ -136,11 +136,12 @@ async def send_whatsapp_template(
         components: Optional template components (header, body, button params)
 
     Returns:
-        True if sent successfully, False otherwise.
+        {"success": True, "wa_message_id": "wamid.xxx"} on success,
+        {"success": False, "error": "..."} on failure.
     """
     if not all([WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID]):
         logger.warning("WhatsApp credentials not configured, skipping template")
-        return False
+        return {"success": False, "error": "WhatsApp credentials not configured"}
 
     headers = {
         "Authorization": f"Bearer {WHATSAPP_TOKEN}",
@@ -171,49 +172,167 @@ async def send_whatsapp_template(
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
                 if resp.status == 200:
-                    logger.info(f"Template '{template_name}' sent to {to_phone}")
-                    return True
+                    data = await resp.json()
+                    wa_message_id = ""
+                    messages = data.get("messages", [])
+                    if messages:
+                        wa_message_id = messages[0].get("id", "")
+                    logger.info(f"Template '{template_name}' sent to {to_phone} (wamid: {wa_message_id})")
+                    return {"success": True, "wa_message_id": wa_message_id}
                 else:
                     body = await resp.text()
                     logger.warning(f"Template send failed {resp.status}: {body}")
-                    return False
+                    return {"success": False, "error": body[:200]}
     except Exception as e:
         logger.error(f"Failed to send template to {to_phone}: {e}")
-        return False
+        return {"success": False, "error": str(e)[:200]}
 
 
 async def get_whatsapp_templates() -> list[dict]:
-    """Fetch approved message templates from Meta Graph API.
+    """Fetch message templates from Meta Graph API with full details.
 
-    Returns list of template dicts: {name, status, language, category, components}
+    First resolves the WABA ID from the phone number, then fetches templates
+    using the WABA endpoint which returns richer data (category, components, etc.).
+    Falls back to phone-number-level endpoint if WABA lookup fails.
+
+    Returns list of template dicts with: name, status, language, category, components
     """
     if not all([WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID]):
         return []
 
-    # The Business Account ID is needed; we derive it from the phone number ID
-    # by querying the phone number endpoint first
-    url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{WHATSAPP_PHONE_NUMBER_ID}/message_templates"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}"}
+    waba_id = os.getenv("WHATSAPP_BUSINESS_ACCOUNT_ID", "")
+
+    # Try to resolve WABA ID from phone number if not configured
+    if not waba_id:
+        try:
+            async with aiohttp.ClientSession() as session:
+                phone_url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{WHATSAPP_PHONE_NUMBER_ID}?fields=whatsapp_business_account"
+                async with session.get(phone_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        waba_id = data.get("whatsapp_business_account", {}).get("id", "")
+        except Exception as e:
+            logger.warning(f"Failed to resolve WABA ID: {e}")
+
+    # Use WABA endpoint if we have the ID, otherwise fall back
+    if waba_id:
+        base_url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{waba_id}/message_templates"
+    else:
+        base_url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{WHATSAPP_PHONE_NUMBER_ID}/message_templates"
+
+    all_templates = []
+    url = f"{base_url}?limit=100&fields=name,status,language,category,components"
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(
-                url,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=15),
+            while url:
+                async with session.get(
+                    url,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    if resp.status != 200:
+                        body = await resp.text()
+                        logger.warning(f"Template fetch failed {resp.status}: {body}")
+                        break
+                    data = await resp.json()
+                    all_templates.extend(data.get("data", []))
+                    # Follow pagination cursor
+                    url = data.get("paging", {}).get("next", "")
+    except Exception as e:
+        logger.error(f"Failed to fetch templates: {e}")
+        return all_templates
+
+    logger.info(f"Fetched {len(all_templates)} WhatsApp templates")
+    return all_templates
+
+
+async def send_interactive_message(
+    to_phone: str,
+    interactive_type: str,
+    body_text: str,
+    buttons: list[dict] | None = None,
+    sections: list[dict] | None = None,
+    header: dict | None = None,
+    footer: str | None = None,
+) -> dict:
+    """Send an interactive message (buttons or list) via WhatsApp Cloud API.
+
+    Args:
+        to_phone: Recipient phone number (E.164 without +)
+        interactive_type: 'button' for reply buttons, 'list' for list menu
+        body_text: Main message body text
+        buttons: For type='button': list of {"id": "btn_1", "title": "Click me"}
+        sections: For type='list': list of {"title": "Section", "rows": [{"id": "row_1", "title": "Option", "description": "..."}]}
+        header: Optional header dict {"type": "text", "text": "Header text"}
+        footer: Optional footer text
+
+    Returns:
+        {"success": True, "wa_message_id": "..."} or {"success": False, "error": "..."}
+    """
+    if not all([WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID]):
+        return {"success": False, "error": "WhatsApp credentials not configured"}
+
+    hdrs = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+    interactive = {
+        "type": interactive_type,
+        "body": {"text": body_text[:1024]},
+    }
+
+    if header:
+        interactive["header"] = header
+    if footer:
+        interactive["footer"] = {"text": footer[:60]}
+
+    if interactive_type == "button" and buttons:
+        interactive["action"] = {
+            "buttons": [
+                {"type": "reply", "reply": {"id": b["id"], "title": b["title"][:20]}}
+                for b in buttons[:3]  # Max 3 buttons
+            ]
+        }
+    elif interactive_type == "list" and sections:
+        interactive["action"] = {
+            "button": "View Options",
+            "sections": sections[:10],  # Max 10 sections
+        }
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_phone,
+        "type": "interactive",
+        "interactive": interactive,
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                WHATSAPP_API_URL,
+                json=payload,
+                headers=hdrs,
+                timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    templates = data.get("data", [])
-                    logger.info(f"Fetched {len(templates)} WhatsApp templates")
-                    return templates
+                    wa_message_id = ""
+                    messages = data.get("messages", [])
+                    if messages:
+                        wa_message_id = messages[0].get("id", "")
+                    logger.info(f"Interactive '{interactive_type}' sent to {to_phone}")
+                    return {"success": True, "wa_message_id": wa_message_id}
                 else:
                     body = await resp.text()
-                    logger.warning(f"Template fetch failed {resp.status}: {body}")
-                    return []
+                    logger.warning(f"Interactive send failed {resp.status}: {body}")
+                    return {"success": False, "error": body[:200]}
     except Exception as e:
-        logger.error(f"Failed to fetch templates: {e}")
-        return []
+        logger.error(f"Failed to send interactive to {to_phone}: {e}")
+        return {"success": False, "error": str(e)[:200]}
 
 
 async def send_followup_message(
