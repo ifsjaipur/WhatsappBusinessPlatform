@@ -5,8 +5,10 @@ Gemini handles STT + LLM + TTS natively in a single model.
 
 Phase 2: Adds conversation transcription, call recording, handoff detection,
 SQLite storage, WhatsApp follow-up messaging, and enriched n8n hooks.
+Phase 3: Auto-hangup after bot says goodbye via LLM function calling.
 """
 
+import asyncio
 import datetime
 import json
 import os
@@ -15,8 +17,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from loguru import logger
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import EndFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -27,6 +31,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
@@ -52,10 +57,30 @@ IMPORTANT RULES:
 - Respond in the SAME LANGUAGE the caller speaks (Hindi or English).
 - Only answer from the knowledge provided below. Never make up information.
 - When the caller asks for details hard to convey on a call, tell them you will send it on WhatsApp after the call.
+- ENDING CALLS: When the conversation is naturally ending (the caller says goodbye, thanks you, or indicates they have no more questions), say your final goodbye message and then call the end_call function. Do NOT call end_call until you have spoken your goodbye.
 
 YOUR KNOWLEDGE:
 {knowledge}
 """
+
+# end_call function tool — lets Gemini signal when the call should end
+_end_call_function = FunctionSchema(
+    name="end_call",
+    description=(
+        "End the phone call. Call this function AFTER you have said your final goodbye "
+        "message to the caller. Use when the conversation is complete, the caller says "
+        "goodbye, or the caller has no more questions."
+    ),
+    properties={
+        "reason": {
+            "type": "string",
+            "description": "Brief reason for ending the call, e.g. 'caller said goodbye', "
+                           "'conversation complete', 'caller has no more questions'",
+        },
+    },
+    required=["reason"],
+)
+_tools = ToolsSchema(standard_tools=[_end_call_function])
 
 async def run_bot(
     webrtc_connection,
@@ -99,6 +124,7 @@ async def run_bot(
                 "content": "A customer is calling IFS. Greet them warmly and ask how you can help.",
             }
         ],
+        tools=_tools,
     )
 
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
@@ -129,6 +155,18 @@ async def run_bot(
             enable_usage_metrics=True,
         ),
     )
+
+    # Register end_call function — Gemini calls this to hang up after goodbye
+    async def handle_end_call(params: FunctionCallParams):
+        reason = params.arguments.get("reason", "conversation complete")
+        logger.info(f"Call {call_id}: LLM triggered end_call — {reason}")
+        await params.result_callback({"status": "ending_call", "reason": reason})
+        # Wait for the goodbye audio to finish playing before ending
+        await asyncio.sleep(3)
+        logger.info(f"Call {call_id}: Auto-hangup executing")
+        await task.queue_frame(EndFrame())
+
+    llm.register_function("end_call", handle_end_call)
 
     # Call session state
     recording_filename = f"{call_id}.wav"
@@ -179,7 +217,8 @@ async def run_bot(
             try:
                 if await is_blocked(caller_phone):
                     logger.info(f"Call {call_id}: BLOCKED caller {caller_phone}, disconnecting")
-                    await task.cancel()
+                    # Queue EndFrame for graceful pipeline shutdown (triggers on_client_disconnected)
+                    await task.queue_frame(EndFrame())
                     return
             except Exception as e:
                 logger.error(f"Call {call_id}: Block check failed: {e}")

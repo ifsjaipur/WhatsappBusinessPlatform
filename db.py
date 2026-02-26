@@ -180,6 +180,32 @@ async def resolve_call(call_id: str):
     logger.info(f"Call {call_id} resolved")
 
 
+async def delete_call(call_id: str) -> bool:
+    """Delete a single call record by ID. Returns True if deleted."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("DELETE FROM calls WHERE id = ?", (call_id,))
+        await db.commit()
+        deleted = cursor.rowcount > 0
+    if deleted:
+        logger.info(f"Call {call_id} deleted")
+    return deleted
+
+
+async def delete_calls_bulk(call_ids: list[str]) -> int:
+    """Delete multiple call records. Returns count of deleted rows."""
+    if not call_ids:
+        return 0
+    placeholders = ",".join("?" for _ in call_ids)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            f"DELETE FROM calls WHERE id IN ({placeholders})", call_ids
+        )
+        await db.commit()
+        count = cursor.rowcount
+    logger.info(f"Bulk deleted {count} call(s)")
+    return count
+
+
 async def get_stats() -> dict:
     """Get aggregate stats for the dashboard."""
     async with aiosqlite.connect(DB_PATH) as db:

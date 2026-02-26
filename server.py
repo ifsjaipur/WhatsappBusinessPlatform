@@ -82,7 +82,7 @@ from campaign_db import (
     update_campaign,
 )
 from campaign_runner import is_campaign_running, request_pause, run_campaign
-from db import complete_call_record, get_call, get_recent_calls, get_stats, init_db, resolve_call
+from db import complete_call_record, delete_call, delete_calls_bulk, get_call, get_recent_calls, get_stats, init_db, resolve_call
 from knowledge import KNOWLEDGE_DIR, load_knowledge
 from message_router import route_webhook
 from orders import handle_razorpay_webhook
@@ -1228,6 +1228,48 @@ async def resolve_conversation_handoff(conversation_id: str):
         raise HTTPException(status_code=404, detail="Conversation not found")
     await resolve_conversation(conversation_id)
     return {"status": "resolved", "conversation_id": conversation_id}
+
+
+# --- Protected: Delete Calls ---
+
+
+@app.delete("/api/calls/{call_id}", dependencies=[Depends(require_auth_csrf)])
+async def delete_call_endpoint(call_id: str):
+    """Delete a single call record and its recording."""
+    call = await get_call(call_id)
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+
+    # Delete recording (MinIO + local)
+    if call.get("recording_path"):
+        if media_storage.is_configured():
+            media_storage.delete_object(media_storage.build_recording_key(call_id))
+        recording_path = RECORDINGS_DIR / f"{call_id}.wav"
+        if recording_path.exists():
+            recording_path.unlink()
+
+    await delete_call(call_id)
+    return {"success": True, "call_id": call_id}
+
+
+@app.post("/api/calls/bulk-delete", dependencies=[Depends(require_auth_csrf)])
+async def bulk_delete_calls(request: Request):
+    """Delete multiple call records and their recordings."""
+    body = await request.json()
+    call_ids = body.get("ids", [])
+    if not call_ids or not isinstance(call_ids, list):
+        raise HTTPException(status_code=400, detail="ids array required")
+
+    # Delete recordings for each call
+    for cid in call_ids:
+        if media_storage.is_configured():
+            media_storage.delete_object(media_storage.build_recording_key(cid))
+        recording_path = RECORDINGS_DIR / f"{cid}.wav"
+        if recording_path.exists():
+            recording_path.unlink()
+
+    count = await delete_calls_bulk(call_ids)
+    return {"success": True, "deleted": count}
 
 
 # --- Protected: Dashboard Stats ---
