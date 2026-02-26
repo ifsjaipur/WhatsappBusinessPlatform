@@ -19,7 +19,7 @@ from knowledge import load_prompt
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
 WHATSAPP_API_VERSION = os.getenv("WHATSAPP_API_VERSION", "v21.0")
-SUPPORT_PHONE = os.getenv("SUPPORT_PHONE", os.getenv("IFS_SUPPORT_PHONE", ""))
+SUPPORT_PHONE = os.getenv("SUPPORT_PHONE", "")
 BUSINESS_NAME = os.getenv("BUSINESS_NAME", "Our Business")
 BUSINESS_SHORT = os.getenv("BUSINESS_SHORT", "")
 

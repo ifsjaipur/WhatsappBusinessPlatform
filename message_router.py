@@ -25,7 +25,7 @@ from orders import process_incoming_order
 import media_storage
 from whatsapp_messaging import download_whatsapp_media, mark_message_as_read, send_whatsapp_text
 
-SUPPORT_PHONE = os.getenv("IFS_SUPPORT_PHONE", "+91 78913 93505")
+SUPPORT_PHONE = os.getenv("SUPPORT_PHONE", "")
 
 
 async def route_webhook(body: dict, knowledge_context: str) -> dict:

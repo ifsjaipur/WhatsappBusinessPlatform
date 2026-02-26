@@ -33,7 +33,7 @@ RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
 RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
 RAZORPAY_API_URL = "https://api.razorpay.com/v1"
-SUPPORT_PHONE = os.getenv("IFS_SUPPORT_PHONE", "{SUPPORT_PHONE}")
+SUPPORT_PHONE = os.getenv("SUPPORT_PHONE", "")
 
 
 async def process_incoming_order(

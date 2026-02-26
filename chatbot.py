@@ -25,7 +25,7 @@ from whatsapp_messaging import mark_message_as_read, send_whatsapp_text
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-SUPPORT_PHONE = os.getenv("SUPPORT_PHONE", os.getenv("IFS_SUPPORT_PHONE", ""))
+SUPPORT_PHONE = os.getenv("SUPPORT_PHONE", "")
 BUSINESS_NAME = os.getenv("BUSINESS_NAME", "Our Business")
 BUSINESS_SHORT = os.getenv("BUSINESS_SHORT", "")
 BUSINESS_CITY = os.getenv("BUSINESS_CITY", "")

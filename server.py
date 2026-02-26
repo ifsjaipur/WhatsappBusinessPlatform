@@ -109,7 +109,7 @@ APP_SHORT_NAME = os.getenv("APP_SHORT_NAME", "WhatsApp")
 BUSINESS_NAME = os.getenv("BUSINESS_NAME", "Our Business")
 BUSINESS_SHORT = os.getenv("BUSINESS_SHORT", "")
 BUSINESS_CITY = os.getenv("BUSINESS_CITY", "")
-SUPPORT_PHONE = os.getenv("SUPPORT_PHONE", os.getenv("IFS_SUPPORT_PHONE", ""))
+SUPPORT_PHONE = os.getenv("SUPPORT_PHONE", "")
 
 # Security config
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
