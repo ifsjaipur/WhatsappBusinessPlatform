@@ -55,11 +55,14 @@ from chat_db import (
 )
 from chatbot import handle_text_message
 from contacts_db import (
+    delete_contact,
+    delete_contacts_bulk,
     export_contacts,
     get_contact,
     get_contact_by_phone,
     get_contact_stats,
     import_contacts,
+    is_blocked,
     list_contacts,
     search_contacts,
     toggle_ai,
@@ -78,7 +81,7 @@ from campaign_db import (
     update_campaign,
 )
 from campaign_runner import is_campaign_running, request_pause, run_campaign
-from db import get_call, get_recent_calls, get_stats, init_db, resolve_call
+from db import complete_call_record, get_call, get_recent_calls, get_stats, init_db, resolve_call
 from knowledge import KNOWLEDGE_DIR, load_knowledge
 from message_router import route_webhook
 from orders import handle_razorpay_webhook
@@ -711,12 +714,15 @@ async def api_send_template_direct(request: Request):
 
 
 @app.get("/api/contacts", dependencies=[Depends(require_auth)])
-async def api_list_contacts(limit: int = 100, stage: str = "", search: str = ""):
-    """List contacts with optional stage filter and search."""
+async def api_list_contacts(
+    limit: int = 100, stage: str = "", search: str = "",
+    sort: str = "last_seen", order: str = "desc",
+):
+    """List contacts with optional stage filter, search, and sort."""
     if search:
         contacts = await search_contacts(search, limit)
     else:
-        contacts = await list_contacts(limit, stage)
+        contacts = await list_contacts(limit, stage, sort=sort, order=order)
     return {"contacts": contacts, "count": len(contacts)}
 
 
@@ -812,6 +818,34 @@ async def api_toggle_ai(contact_id: str, request: Request):
 
     await toggle_ai(contact_id, bool(enabled))
     return {"status": "ok", "contact_id": contact_id, "ai_enabled": bool(enabled)}
+
+
+@app.delete("/api/contacts/{contact_id}", dependencies=[Depends(require_auth_csrf)])
+async def api_delete_contact(contact_id: str):
+    """Delete a single contact."""
+    deleted = await delete_contact(contact_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    return {"status": "deleted", "contact_id": contact_id}
+
+
+@app.post("/api/contacts/bulk-delete", dependencies=[Depends(require_auth_csrf)])
+async def api_bulk_delete_contacts(request: Request):
+    """Delete multiple contacts by ID.
+
+    Body: { "ids": ["contact_id_1", "contact_id_2", ...] }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    ids = body.get("ids", [])
+    if not ids:
+        raise HTTPException(status_code=400, detail="No contact IDs provided")
+
+    count = await delete_contacts_bulk(ids)
+    return {"status": "deleted", "count": count}
 
 
 # --- n8n Integration API ---

@@ -30,7 +30,7 @@ from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
-from contacts_db import get_or_create_contact
+from contacts_db import get_or_create_contact, is_blocked
 from db import complete_call_record, create_call_record
 from hooks import send_call_summary
 from knowledge import load_prompt
@@ -162,6 +162,16 @@ async def run_bot(
     async def on_connected(transport_obj, client):
         call_metadata["connected_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         logger.info(f"Call {call_id}: Connected from {caller_phone}")
+
+        # Block check: disconnect blocked callers immediately
+        if caller_phone:
+            try:
+                if await is_blocked(caller_phone):
+                    logger.info(f"Call {call_id}: BLOCKED caller {caller_phone}, disconnecting")
+                    await task.cancel()
+                    return
+            except Exception as e:
+                logger.error(f"Call {call_id}: Block check failed: {e}")
 
         # Start audio recording
         await audiobuffer.start_recording()

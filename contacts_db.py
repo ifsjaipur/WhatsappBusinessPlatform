@@ -13,7 +13,7 @@ from loguru import logger
 from db import DB_PATH, _enable_foreign_keys, _validate_columns
 from utils import generate_id
 
-VALID_STAGES = ("new", "contacted", "interested", "enrolled", "lost")
+VALID_STAGES = ("new", "contacted", "interested", "enrolled", "lost", "blocked")
 
 
 async def init_contacts_table():
@@ -158,19 +158,25 @@ async def search_contacts(query: str, limit: int = 50) -> list[dict]:
             return [_parse_contact(row) for row in rows]
 
 
-async def list_contacts(limit: int = 100, stage: str = "") -> list[dict]:
-    """List contacts, optionally filtered by stage."""
+async def list_contacts(
+    limit: int = 100, stage: str = "", sort: str = "last_seen", order: str = "desc",
+) -> list[dict]:
+    """List contacts, optionally filtered by stage, with configurable sort."""
+    allowed_sort = {"last_seen", "created_at", "first_seen", "name"}
+    sort_col = sort if sort in allowed_sort else "last_seen"
+    sort_dir = "ASC" if order.lower() == "asc" else "DESC"
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         if stage and stage in VALID_STAGES:
             async with db.execute(
-                "SELECT * FROM contacts WHERE stage = ? ORDER BY last_seen DESC LIMIT ?",
+                f"SELECT * FROM contacts WHERE stage = ? ORDER BY {sort_col} {sort_dir} LIMIT ?",
                 (stage, limit),
             ) as cursor:
                 rows = await cursor.fetchall()
         else:
             async with db.execute(
-                "SELECT * FROM contacts ORDER BY last_seen DESC LIMIT ?",
+                f"SELECT * FROM contacts ORDER BY {sort_col} {sort_dir} LIMIT ?",
                 (limit,),
             ) as cursor:
                 rows = await cursor.fetchall()
@@ -275,3 +281,38 @@ async def get_contact_stats() -> dict:
             stats["total"] = (await cursor.fetchone())[0]
 
         return stats
+
+
+async def delete_contact(contact_id: str) -> bool:
+    """Delete a single contact by ID. Returns True if deleted."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("DELETE FROM contacts WHERE id = ?", (contact_id,))
+        await db.commit()
+        if cursor.rowcount > 0:
+            logger.info(f"Contact {contact_id} deleted")
+            return True
+        return False
+
+
+async def delete_contacts_bulk(contact_ids: list[str]) -> int:
+    """Delete multiple contacts by ID. Returns count of deleted contacts."""
+    if not contact_ids:
+        return 0
+    async with aiosqlite.connect(DB_PATH) as db:
+        placeholders = ",".join("?" for _ in contact_ids)
+        cursor = await db.execute(
+            f"DELETE FROM contacts WHERE id IN ({placeholders})", contact_ids,
+        )
+        await db.commit()
+        logger.info(f"Bulk deleted {cursor.rowcount} contacts")
+        return cursor.rowcount
+
+
+async def is_blocked(phone: str) -> bool:
+    """Check if a phone number belongs to a blocked contact."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT 1 FROM contacts WHERE phone = ? AND stage = 'blocked' LIMIT 1",
+            (phone,),
+        ) as cursor:
+            return await cursor.fetchone() is not None

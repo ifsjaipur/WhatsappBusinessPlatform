@@ -84,6 +84,11 @@ async def route_webhook(body: dict, knowledge_context: str) -> dict:
             contact_id = contact["id"]
             ai_enabled = contact.get("ai_enabled", 1)
 
+            # Block check: silently ignore all messages from blocked contacts
+            if contact.get("stage") == "blocked":
+                logger.info(f"Router: BLOCKED contact {sender_phone}, ignoring {msg_type}")
+                return {"action": "blocked", "phone": sender_phone}
+
             logger.info(
                 f"Router: {msg_type} from {sender_phone} ({sender_name}) "
                 f"[contact={contact_id}, ai={'on' if ai_enabled else 'off'}]"

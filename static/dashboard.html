@@ -20,6 +20,7 @@
         .badge-interested { background: #fef9c3; color: #854d0e; }
         .badge-enrolled { background: #dcfce7; color: #166534; }
         .badge-lost { background: #fee2e2; color: #991b1b; }
+        .badge-blocked { background: #991b1b; color: #ffffff; }
         .file-active { background: #eff6ff; border-left: 3px solid #3b82f6; }
         .msg-user { background: #dbeafe; margin-left: auto; }
         .msg-assistant { background: #f3f4f6; margin-right: auto; }
@@ -160,7 +161,7 @@
         <!-- Contacts Panel (Mini CRM) -->
         <div id="panel-contacts" class="max-w-7xl mx-auto px-4 mt-3 hidden">
             <!-- Pipeline Stats -->
-            <div id="contacts-pipeline" class="grid grid-cols-3 md:grid-cols-6 gap-3 mb-4">
+            <div id="contacts-pipeline" class="grid grid-cols-4 md:grid-cols-7 gap-3 mb-4">
                 <div class="bg-white rounded-lg shadow-sm p-3 border cursor-pointer hover:border-blue-300" onclick="filterContactsByStage('')">
                     <p class="text-xs text-gray-500">Total</p>
                     <p id="pipeline-total" class="text-xl font-bold text-gray-900">-</p>
@@ -185,6 +186,10 @@
                     <p class="text-xs text-gray-500">Lost</p>
                     <p id="pipeline-lost" class="text-xl font-bold text-red-600">-</p>
                 </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border cursor-pointer hover:border-red-400" onclick="filterContactsByStage('blocked')">
+                    <p class="text-xs text-gray-500">Blocked</p>
+                    <p id="pipeline-blocked" class="text-xl font-bold text-red-800">-</p>
+                </div>
             </div>
 
             <!-- Search + Filter + Import/Export -->
@@ -199,8 +204,20 @@
                     <option value="interested">Interested</option>
                     <option value="enrolled">Enrolled</option>
                     <option value="lost">Lost</option>
+                    <option value="blocked">Blocked</option>
+                </select>
+                <select id="contacts-sort" onchange="loadContacts()" class="text-sm border rounded px-2 py-1.5">
+                    <option value="last_seen">Sort: Last Seen</option>
+                    <option value="first_seen">Sort: First Seen</option>
+                    <option value="created_at">Sort: Created</option>
+                    <option value="name">Sort: Name</option>
+                </select>
+                <select id="contacts-sort-order" onchange="loadContacts()" class="text-sm border rounded px-2 py-1.5">
+                    <option value="desc">Newest First</option>
+                    <option value="asc">Oldest First</option>
                 </select>
                 <div class="ml-auto flex gap-2">
+                    <button id="bulk-delete-btn" onclick="bulkDeleteContacts()" class="hidden text-sm bg-red-500 text-white px-3 py-1.5 rounded hover:bg-red-600">Delete Selected</button>
                     <button onclick="showImportModal()" class="text-sm bg-green-500 text-white px-3 py-1.5 rounded hover:bg-green-600">Import CSV</button>
                     <button onclick="exportContacts()" class="text-sm bg-gray-200 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-300">Export CSV</button>
                 </div>
@@ -211,6 +228,7 @@
                 <table class="w-full text-sm">
                     <thead class="bg-gray-50 border-b">
                         <tr>
+                            <th class="px-2 py-2 w-8"><input type="checkbox" id="select-all-contacts" onchange="toggleSelectAll(this)"></th>
                             <th class="text-left px-4 py-2 font-medium text-gray-600">Name</th>
                             <th class="text-left px-4 py-2 font-medium text-gray-600">Phone</th>
                             <th class="text-left px-4 py-2 font-medium text-gray-600">Stage</th>
@@ -392,6 +410,7 @@
                             <option value="interested">Interested</option>
                             <option value="enrolled">Enrolled</option>
                             <option value="lost">Lost</option>
+                            <option value="blocked">Blocked</option>
                         </select>
                     </div>
                     <div>
@@ -403,9 +422,12 @@
                         <textarea id="edit-notes" rows="3" class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"></textarea>
                     </div>
                 </div>
-                <div class="flex gap-2 justify-end mt-4">
-                    <button onclick="closeContactModal()" class="text-sm bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300">Cancel</button>
-                    <button onclick="saveContactEdit()" class="text-sm bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Save</button>
+                <div class="flex gap-2 justify-between mt-4">
+                    <button onclick="deleteContactFromModal()" class="text-sm bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">Delete Contact</button>
+                    <div class="flex gap-2">
+                        <button onclick="closeContactModal()" class="text-sm bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300">Cancel</button>
+                        <button onclick="saveContactEdit()" class="text-sm bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Save</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -535,6 +557,7 @@
                                 <option value="interested">Interested</option>
                                 <option value="enrolled">Enrolled</option>
                                 <option value="lost">Lost</option>
+                                <option value="blocked">Blocked</option>
                             </select>
                         </div>
                         <div>
@@ -803,7 +826,7 @@
     }
 
     function stageBadge(stage) {
-        const cls = { 'new': 'badge-new', 'contacted': 'badge-contacted', 'interested': 'badge-interested', 'enrolled': 'badge-enrolled', 'lost': 'badge-lost' }[stage] || 'badge-new';
+        const cls = { 'new': 'badge-new', 'contacted': 'badge-contacted', 'interested': 'badge-interested', 'enrolled': 'badge-enrolled', 'lost': 'badge-lost', 'blocked': 'badge-blocked' }[stage] || 'badge-new';
         return `<span class="badge ${cls}">${stage || 'new'}</span>`;
     }
 
@@ -1302,6 +1325,7 @@
             document.getElementById('pipeline-interested').textContent = data.interested || 0;
             document.getElementById('pipeline-enrolled').textContent = data.enrolled || 0;
             document.getElementById('pipeline-lost').textContent = data.lost || 0;
+            document.getElementById('pipeline-blocked').textContent = data.blocked || 0;
         } catch (e) { if (e.message !== 'Unauthorized') console.error('Stats error:', e); }
     }
 
@@ -1315,12 +1339,79 @@
         contactSearchTimeout = setTimeout(loadContacts, 300);
     }
 
+    let selectedContactIds = new Set();
+
+    function toggleSelectAll(checkbox) {
+        const checkboxes = document.querySelectorAll('.contact-checkbox');
+        checkboxes.forEach(cb => { cb.checked = checkbox.checked; });
+        selectedContactIds.clear();
+        if (checkbox.checked) {
+            checkboxes.forEach(cb => selectedContactIds.add(cb.dataset.id));
+        }
+        updateBulkDeleteBtn();
+    }
+
+    function toggleSelectContact(checkbox, id) {
+        if (checkbox.checked) {
+            selectedContactIds.add(id);
+        } else {
+            selectedContactIds.delete(id);
+            document.getElementById('select-all-contacts').checked = false;
+        }
+        updateBulkDeleteBtn();
+    }
+
+    function updateBulkDeleteBtn() {
+        const btn = document.getElementById('bulk-delete-btn');
+        if (selectedContactIds.size > 0) {
+            btn.classList.remove('hidden');
+            btn.textContent = `Delete Selected (${selectedContactIds.size})`;
+        } else {
+            btn.classList.add('hidden');
+        }
+    }
+
+    async function bulkDeleteContacts() {
+        if (!selectedContactIds.size) return;
+        if (!confirm(`Delete ${selectedContactIds.size} contact(s)? This cannot be undone.`)) return;
+        try {
+            await authFetch('/api/contacts/bulk-delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: Array.from(selectedContactIds) }),
+            });
+            selectedContactIds.clear();
+            updateBulkDeleteBtn();
+            document.getElementById('select-all-contacts').checked = false;
+            loadContacts();
+            loadContactStats();
+        } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to delete: ' + e.message); }
+    }
+
+    async function deleteContactFromModal() {
+        const contactId = document.getElementById('edit-contact-id').value;
+        if (!contactId) return;
+        if (!confirm('Delete this contact? This cannot be undone.')) return;
+        try {
+            await authFetch(`/api/contacts/${contactId}`, { method: 'DELETE' });
+            closeContactModal();
+            loadContacts();
+            loadContactStats();
+        } catch (e) { if (e.message !== 'Unauthorized') alert('Failed to delete: ' + e.message); }
+    }
+
     async function loadContacts() {
         const search = document.getElementById('contacts-search').value.trim();
         const stage = document.getElementById('contacts-stage-filter').value;
-        const params = new URLSearchParams({ limit: '100' });
+        const sort = document.getElementById('contacts-sort').value;
+        const order = document.getElementById('contacts-sort-order').value;
+        const params = new URLSearchParams({ limit: '100', sort, order });
         if (search) params.set('search', search);
         if (stage) params.set('stage', stage);
+        selectedContactIds.clear();
+        updateBulkDeleteBtn();
+        const selectAll = document.getElementById('select-all-contacts');
+        if (selectAll) selectAll.checked = false;
         try {
             const res = await authFetch(`/api/contacts?${params}`);
             const data = await res.json();
@@ -1335,11 +1426,12 @@
                 const safeId = escapeHtml(c.id);
                 return `
                     <tr class="border-b hover:bg-gray-50">
+                        <td class="px-2 py-2"><input type="checkbox" class="contact-checkbox" data-id="${safeId}" onchange="toggleSelectContact(this, '${safeId}')"></td>
                         <td class="px-4 py-2">${escapeHtml(c.name || '-')}</td>
                         <td class="px-4 py-2 font-mono text-xs">${escapeHtml(c.phone || '-')}</td>
                         <td class="px-4 py-2">
                             <select class="stage-select badge-${escapeHtml(c.stage || 'new')}" onchange="changeStage('${safeId}', this.value)">
-                                ${['new','contacted','interested','enrolled','lost'].map(s => `<option value="${s}" ${s === c.stage ? 'selected' : ''}>${s}</option>`).join('')}
+                                ${['new','contacted','interested','enrolled','lost','blocked'].map(s => `<option value="${s}" ${s === c.stage ? 'selected' : ''}>${s}</option>`).join('')}
                             </select>
                         </td>
                         <td class="px-4 py-2 text-xs text-gray-500">${escapeHtml(c.source || '-')}</td>
