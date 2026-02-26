@@ -19,7 +19,9 @@ from knowledge import load_prompt
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
 WHATSAPP_API_VERSION = os.getenv("WHATSAPP_API_VERSION", "v21.0")
-SUPPORT_PHONE = os.getenv("IFS_SUPPORT_PHONE", "+91 78913 93505")
+SUPPORT_PHONE = os.getenv("SUPPORT_PHONE", os.getenv("IFS_SUPPORT_PHONE", ""))
+BUSINESS_NAME = os.getenv("BUSINESS_NAME", "Our Business")
+BUSINESS_SHORT = os.getenv("BUSINESS_SHORT", "")
 
 WHATSAPP_API_URL = (
     f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{WHATSAPP_PHONE_NUMBER_ID}/messages"
@@ -474,23 +476,22 @@ async def send_followup_message(
             return
 
     # Fallback: generic message
+    biz = BUSINESS_NAME
+    biz_short = BUSINESS_SHORT or BUSINESS_NAME
     if handoff_requested:
         message = (
-            f"Hi {name}! Thank you for calling Institute of Financial Studies.\n\n"
+            f"Hi {name}! Thank you for calling {biz}.\n\n"
             f"We noticed you would like to speak with our team directly. "
             f"A team member will reach out to you shortly.\n\n"
-            f"In the meantime, feel free to reach us at:\n"
-            f"Phone: {SUPPORT_PHONE}\n"
-            f"Mon-Sat: 10 AM - 6 PM\n\n"
-            f"Thank you for your interest in IFS!"
+            + (f"In the meantime, feel free to reach us at:\nPhone: {SUPPORT_PHONE}\nMon-Sat: 10 AM - 6 PM\n\n" if SUPPORT_PHONE else "")
+            + f"Thank you for your interest in {biz_short}!"
         )
     else:
         message = (
-            f"Hi {name}! Thank you for calling Institute of Financial Studies.\n\n"
-            f"If you have any more questions, feel free to call us again or reach out at:\n"
-            f"Phone: {SUPPORT_PHONE}\n"
-            f"Mon-Sat: 10 AM - 6 PM\n\n"
-            f"We look forward to hearing from you!"
+            f"Hi {name}! Thank you for calling {biz}.\n\n"
+            f"If you have any more questions, feel free to call us again"
+            + (f" or reach out at:\nPhone: {SUPPORT_PHONE}\nMon-Sat: 10 AM - 6 PM" if SUPPORT_PHONE else "")
+            + f"\n\nWe look forward to hearing from you!"
         )
 
     await send_whatsapp_text(caller_phone, message)

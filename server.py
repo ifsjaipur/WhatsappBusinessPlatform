@@ -1,4 +1,4 @@
-"""IFS WhatsApp Business Platform
+"""WhatsApp Business Platform
 
 FastAPI server that:
 - Auto-accepts incoming WhatsApp calls -> Gemini Live AI voice agent
@@ -102,6 +102,14 @@ WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
 WHATSAPP_APP_SECRET = os.getenv("WHATSAPP_APP_SECRET", "")
 WHATSAPP_WEBHOOK_VERIFICATION_TOKEN = os.getenv("WHATSAPP_WEBHOOK_VERIFICATION_TOKEN", "")
 PORT = int(os.getenv("PORT", "7860"))
+
+# Branding (white-label)
+APP_NAME = os.getenv("APP_NAME", "WhatsApp Platform")
+APP_SHORT_NAME = os.getenv("APP_SHORT_NAME", "WhatsApp")
+BUSINESS_NAME = os.getenv("BUSINESS_NAME", "Our Business")
+BUSINESS_SHORT = os.getenv("BUSINESS_SHORT", "")
+BUSINESS_CITY = os.getenv("BUSINESS_CITY", "")
+SUPPORT_PHONE = os.getenv("SUPPORT_PHONE", os.getenv("IFS_SUPPORT_PHONE", ""))
 
 # Security config
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
@@ -291,7 +299,53 @@ async def lifespan(app: FastAPI):
             logger.info("Cleanup done")
 
 
-app = FastAPI(title="IFS WhatsApp Business Platform", version="4.0.0", lifespan=lifespan)
+app = FastAPI(title=APP_NAME, version="4.0.0", lifespan=lifespan)
+
+# --- PWA routes (must come before static mount) ---
+
+
+@app.get("/manifest.json")
+async def pwa_manifest():
+    """Dynamic PWA manifest with branding from env vars."""
+    return JSONResponse({
+        "name": APP_NAME,
+        "short_name": APP_SHORT_NAME,
+        "start_url": "/static/dashboard.html",
+        "display": "standalone",
+        "background_color": "#f9fafb",
+        "theme_color": "#3b82f6",
+        "icons": [
+            {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"},
+        ],
+    })
+
+
+@app.get("/service-worker.js")
+async def service_worker():
+    """Serve service worker from root scope."""
+    sw_path = STATIC_DIR / "service-worker.js"
+    if not sw_path.exists():
+        raise HTTPException(status_code=404, detail="Service worker not found")
+    return FileResponse(
+        str(sw_path),
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/"},
+    )
+
+
+@app.get("/api/branding")
+async def get_branding():
+    """Public branding info for dashboard UI (no auth required)."""
+    return {
+        "app_name": APP_NAME,
+        "app_short_name": APP_SHORT_NAME,
+        "business_name": BUSINESS_NAME,
+        "business_short": BUSINESS_SHORT,
+        "business_city": BUSINESS_CITY,
+        "support_phone": SUPPORT_PHONE,
+    }
+
 
 # Mount static files for dashboard (login page is always accessible,
 # but dashboard.html checks auth via JS)
@@ -1455,7 +1509,7 @@ async def dashboard():
 @app.get("/health")
 async def health():
     """Health check for Coolify."""
-    return {"status": "ok", "service": "ifs-whatsapp-platform", "version": "4.0.0"}
+    return {"status": "ok", "service": APP_NAME, "version": "4.0.0"}
 
 
 async def run_server(host: str, port: int):
@@ -1470,7 +1524,7 @@ async def run_server(host: str, port: int):
     server = uvicorn.Server(config)
     server_task = asyncio.create_task(server.serve())
 
-    logger.info(f"IFS Voice Agent running on {host}:{port}")
+    logger.info(f"{APP_NAME} running on {host}:{port}")
 
     await shutdown_event.wait()
 
@@ -1482,7 +1536,7 @@ async def run_server(host: str, port: int):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="IFS WhatsApp AI Voice Agent")
+    parser = argparse.ArgumentParser(description=APP_NAME)
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=PORT)
     parser.add_argument("--verbose", "-v", action="count")

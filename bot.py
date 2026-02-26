@@ -49,8 +49,13 @@ load_dotenv(override=True)
 RECORDINGS_DIR = Path(__file__).parent / "recordings"
 RECORDINGS_DIR.mkdir(exist_ok=True)
 
+# Branding from env vars (white-label)
+_BUSINESS_NAME = os.getenv("BUSINESS_NAME", "Our Business")
+_BUSINESS_SHORT = os.getenv("BUSINESS_SHORT", "")
+_BUSINESS_CITY = os.getenv("BUSINESS_CITY", "")
+
 # Hardcoded fallback — only used if knowledge/prompt_voice.md is missing
-_DEFAULT_VOICE_PROMPT = """You are an AI voice assistant for Institute of Financial Studies (IFS), Jaipur.
+_DEFAULT_VOICE_PROMPT = """You are an AI voice assistant for {business_name}{business_location}.
 
 IMPORTANT RULES:
 - You are answering a live phone call. Keep responses brief (1-3 sentences).
@@ -97,8 +102,15 @@ async def run_bot(
     logger.info(f"Call {call_id}: Starting bot for {caller_phone} ({caller_name})")
 
     voice_prompt = load_prompt("voice", _DEFAULT_VOICE_PROMPT)
+    business_location = f", {_BUSINESS_CITY}" if _BUSINESS_CITY else ""
+    business_label = _BUSINESS_NAME
+    if _BUSINESS_SHORT and _BUSINESS_SHORT != _BUSINESS_NAME:
+        business_label = f"{_BUSINESS_NAME} ({_BUSINESS_SHORT})"
     system_instruction = voice_prompt.format(
-        knowledge=knowledge_context or "No knowledge documents loaded yet."
+        knowledge=knowledge_context or "No knowledge documents loaded yet.",
+        business_name=business_label,
+        business_short=_BUSINESS_SHORT or _BUSINESS_NAME,
+        business_location=business_location,
     )
 
     transport = SmallWebRTCTransport(
@@ -121,7 +133,7 @@ async def run_bot(
         [
             {
                 "role": "user",
-                "content": "A customer is calling IFS. Greet them warmly and ask how you can help.",
+                "content": f"A customer is calling {_BUSINESS_SHORT or _BUSINESS_NAME}. Greet them warmly and ask how you can help.",
             }
         ],
         tools=_tools,
